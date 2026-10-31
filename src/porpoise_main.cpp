@@ -804,6 +804,9 @@ std::vector<std::string> g_covers_again_ids; /* Download covers again: these gam
 
 void fetch_covers(bool force = false)
 {
+    /* Started by PS5-ECAM: its library has the box art and the games' details; nothing to download here. */
+    if (ecam_bridge::request.valid)
+        return;
     g_covers_force |= force;
     /* Not while the updater is online: one download at a time, and it goes first. */
     const porpoise::update::Phase updating = porpoise::update::progress().phase;
@@ -1177,8 +1180,10 @@ void apply_sound_set(int set)
 
 void apply_settings()
 {
-    porpoise::sound::set_music(g_settings.menu_music, g_settings.music_volume / 10.0f);
-    porpoise::sound::set_effects(g_settings.menu_sounds, g_settings.sounds_volume / 10.0f);
+    /* Started by PS5-ECAM: its launcher is the menus, so Porpoise's own music and sounds stay quiet. */
+    const bool own_menus = !ecam_bridge::request.valid;
+    porpoise::sound::set_music(g_settings.menu_music && own_menus, g_settings.music_volume / 10.0f);
+    porpoise::sound::set_effects(g_settings.menu_sounds && own_menus, g_settings.sounds_volume / 10.0f);
     apply_sound_set(g_settings.sound_set);
     porpoise::pad::set_mapping(g_settings.mapping());
     porpoise::pad::set_rumble_enabled(g_settings.rumble);
@@ -2659,7 +2664,8 @@ int main(int argc, char **argv)
     porpoise::ui::widescreen::set_dir(PORPOISE_APP "/assets/widescreen");
     g_app.set_sound_hook(play_sound);
     g_app.set_jingle_hook([](const std::int16_t *frames, std::size_t count) {
-        porpoise::sound::play_jingle(frames, count);
+        if (!ecam_bridge::request.valid) /* PS5-ECAM's start has no jingle of Porpoise's */
+            porpoise::sound::play_jingle(frames, count);
     });
 #ifndef PORPOISE_DESKTOP /* RetroAchievements is the PS5's for now */
     porpoise::ra::init(g_data);
