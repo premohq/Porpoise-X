@@ -1115,17 +1115,20 @@ void App::build_settings()
     }
 #endif
 
-    header("Downloads");
-    toggle("download_covers", "Download Covers",
-           "Box art from GameTDB.com, saved in /data/porpoise/covers. Needs the console online.",
-           &draft_.download_covers);
-    toggle("download_info", "Download Game Info",
-           "Descriptions, developers, release dates and disc art from GameTDB.com, for Details.",
-           &draft_.download_info);
-    action("Download Covers Again",
-           "Gets every game's cover, box and disc art from GameTDB.com again, in place of what Porpoise has (your "
-           "own art too). For art that downloaded wrong or cut short. Needs the console online.",
-           "Download\xE2\x80\xA6", kRowCoversAgain);
+    if (!ecam_) /* PS5-ECAM's library has the box art and the games' details */
+    {
+        header("Downloads");
+        toggle("download_covers", "Download Covers",
+               "Box art from GameTDB.com, saved in /data/porpoise/covers. Needs the console online.",
+               &draft_.download_covers);
+        toggle("download_info", "Download Game Info",
+               "Descriptions, developers, release dates and disc art from GameTDB.com, for Details.",
+               &draft_.download_info);
+        action("Download Covers Again",
+               "Gets every game's cover, box and disc art from GameTDB.com again, in place of what Porpoise has (your "
+               "own art too). For art that downloaded wrong or cut short. Needs the console online.",
+               "Download\xE2\x80\xA6", kRowCoversAgain);
+    }
 
 #ifndef PORPOISE_DESKTOP /* the PS5's own: its drives and sandbox */
     header("Storage");
@@ -1139,6 +1142,9 @@ void App::build_settings()
         auto place = [&](const std::string &label, const std::string &name, const std::string &drive) {
             struct stat st;
             if (drive != "/data" && (stat(drive.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)))
+                return;
+            /* PS5-ECAM's Settings and Saves find Porpoise's things in /data/porpoise: back there only */
+            if (ecam_ && drive != "/data")
                 return;
             const std::string path = drive + "/porpoise";
             if (path != data_dir_)
@@ -1298,6 +1304,7 @@ void App::build_settings()
         choice("mc_view", "Memory Cards View", kHelp[std::clamp(draft_.mc_view, 0, 4)], &draft_.mc_view,
                {"Cards", "Blocks", "By Game", "Cubes", "Retro TV"});
     }
+    if (!ecam_) /* started by PS5-ECAM, its menus play none (apply_settings) */
     {
         /* Porpoise's own sound, the menus' (not the games'): each off or how
          * loud, in one row (menu_music and music_volume, menu_sounds and
@@ -1363,6 +1370,7 @@ void App::build_settings()
 
     header("About");
     info("Porpoise (DolphinPS5)", build_label(), "A GameCube and Wii emulator for PS5, powered by Dolphin.");
+    if (!ecam_) /* PS5-ECAM updates the Porpoise it carries with everything else */
     {
         SettingRow r;
         r.section = section;
@@ -1377,10 +1385,11 @@ void App::build_settings()
         r.action = kRowUpdate;
         rows_.push_back(r);
     }
-    toggle("beta_updates", "Beta Updates",
-           "Offer test versions (pre-releases) too when they come out: newer, but less tested. A beta of Porpoise "
-           "always offers the next beta.",
-           &draft_.beta_updates);
+    if (!ecam_)
+        toggle("beta_updates", "Beta Updates",
+               "Offer test versions (pre-releases) too when they come out: newer, but less tested. A beta of Porpoise "
+               "always offers the next beta.",
+               &draft_.beta_updates);
     if (!version_labels_.empty())
     {
         SettingRow r;
@@ -1493,7 +1502,7 @@ void App::build_game_settings()
     reset.values = {tr("Reset\xE2\x80\xA6")};
     reset.action = kRowResetGame;
     rows_.push_back(reset);
-    if (game_for_ && !game_for_->id.empty())
+    if (game_for_ && !game_for_->id.empty() && !ecam_)
     {
         SettingRow art;
         art.section = "This Game";
@@ -1508,7 +1517,7 @@ void App::build_game_settings()
      * or moving down stopped at that header and never reached them. */
     add_setup_rows(true);
 #ifndef PORPOISE_DESKTOP
-    if (game_for_ && !sandboxed_)
+    if (game_for_ && !sandboxed_ && !ecam_) /* started by PS5-ECAM, its tiles are PS5-ECAM's */
     {
         /* Its own home screen tile (porpoise_forwarders): no settings of the
          * game's, so no key (they wait for nothing). */

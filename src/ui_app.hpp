@@ -941,6 +941,9 @@ private:
 public:
     /* Whether Porpoise was left in the app sandbox (porpoise_main). */
     void set_sandboxed(bool sandboxed) { sandboxed_ = sandboxed; }
+    /* Whether PS5-ECAM started Porpoise (ecam_bridge.h): no rows for what PS5-ECAM does instead, its
+     * updates, home screen tiles, cover downloads, menu sounds and the folder it keeps Porpoise's things in. */
+    void set_ecam(bool ecam) { ecam_ = ecam; }
     void set_diagnostics(std::function<std::vector<std::pair<bool, std::string>>()> checks)
     {
         diagnostics_ = std::move(checks);
@@ -975,6 +978,7 @@ public:
     void restart_fresh();
 private:
     bool sandboxed_ = false;
+    bool ecam_ = false;
     bool searching_ = false;
     std::vector<std::string> version_tags_, version_labels_;
     std::vector<std::size_t> version_sizes_;

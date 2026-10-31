@@ -106,8 +106,11 @@ dist="$root/dist/$title_id"
 [[ -f $dist/eboot.bin ]] || { echo "error: no eboot.bin under $dist" >&2; exit 2; }
 
 echo "==> [porpoise] step 3/3: staging"
-# The home screen forwarder Porpoise copies into each tile it makes.
-bash "$root/tools/build-forwarder.sh" "$dist/assets/forwarder"
+# PS5-ECAM's Porpoise (this branch: PS5-ECAM's tools/build-retro.py puts it in the app's retro/porpoise)
+# leaves out what PS5-ECAM does instead: the home screen forwarder Porpoise copies into each tile it makes
+# (PS5-ECAM makes the tiles) and the menus' music and sounds (PS5-ECAM's launcher has its own, and Porpoise
+# plays none when PS5-ECAM starts it). The emulation's files and the in-game menu's stay.
+rm -rf -- "$dist/assets/forwarder" "$dist/assets/sounds"
 cp -a -- "$root/config/LEGAL.txt" "$dist/LEGAL.txt"
 mkdir -p "$dist/cores" "$dist/info" "$dist/system" "$dist/content" "$dist/porpoise"
 # The core ships without its static symbol table (.symtab/.strtab, ~0.7 MB

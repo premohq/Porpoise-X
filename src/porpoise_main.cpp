@@ -740,6 +740,10 @@ porpoise::update::Release g_release;
 std::vector<porpoise::update::Release> g_releases; /* every one GitHub lists, for Choose a version */
 void read_latest_release()
 {
+    /* Started by PS5-ECAM: PS5-ECAM updates its retro/porpoise with everything else, so no newer
+     * Porpoise is offered here (the file is a Porpoise of its own's, in the same folder). */
+    if (ecam_bridge::request.valid)
+        return;
     /* A beta of Porpoise always looks for the next beta; a final release
      * only when Beta updates is on. */
     const bool betas = g_settings.beta_updates || porpoise::ui::look::kVersionBeta != 0;
@@ -2627,7 +2631,10 @@ int main(int argc, char **argv)
     mark_start("start: Porpoise's mark on screen, ms");
 
     start_library();
-    porpoise::forwarders::repair(g_data);
+    /* Started by PS5-ECAM: the home screen tiles are PS5-ECAM's, and the ones a Porpoise of its own made
+     * keep its program, not this copy's. */
+    if (!ecam_bridge::request.valid)
+        porpoise::forwarders::repair(g_data);
     ps5::debug::mark_value("main: games in the library", static_cast<long long>(g_library.games().size()));
     mark_start("start: library read, ms");
     /* 2.7: Revolution shows GameCube games too; its old Wii-only filter goes. */
@@ -2695,6 +2702,8 @@ int main(int argc, char **argv)
     });
 #endif
     porpoise::banner::set_cache_dir(g_data + "/banners");
+    /* PS5-ECAM's copy has no assets/sounds (tools/build-porpoise.sh): nothing to load, and the mix it
+     * pumps in the menus is silence. */
     porpoise::sound::load(PORPOISE_APP "/assets");
     g_sounds_ready = true;
     apply_sound_set(g_settings.sound_set);
@@ -2707,8 +2716,11 @@ int main(int argc, char **argv)
     read_latest_release();
     apply_settings();
     g_app.set_sandboxed(g_sandboxed);
+    g_app.set_ecam(ecam_bridge::request.valid);
     g_app.set_diagnostics(diagnostics);
-    if (!g_sandboxed && !g_settings.setup_checked)
+    /* Started by PS5-ECAM, no first start of Porpoise's: PS5-ECAM set up its folder (/data/porpoise, where
+     * PS5-ECAM's Settings and Saves find it) and its menus are PS5-ECAM's. */
+    if (!g_sandboxed && !g_settings.setup_checked && !ecam_bridge::request.valid)
     {
         /* The first start: a look to begin with, then the welcome and what
          * Porpoise can see (setup_checked is saved once a look is chosen).
@@ -2904,7 +2916,7 @@ int main(int argc, char **argv)
                 }
                 rescan_library();
                 g_app.restart_fresh();
-                if (!g_sandboxed)
+                if (!g_sandboxed && !ecam_bridge::request.valid) /* PS5-ECAM's start: no first start of Porpoise's */
                     g_app.start_welcome();
                 start_entrance();
                 continue;
@@ -2923,18 +2935,19 @@ int main(int argc, char **argv)
                 move_data(g_app.move_target(), hz);
             if (action == porpoise::ui::App::Action::UseFolder && !g_app.move_target().empty())
                 use_data(g_app.move_target(), hz);
-            if (action == porpoise::ui::App::Action::CheckUpdate)
+            /* Started by PS5-ECAM, no updates of Porpoise's (read_latest_release): its Settings has no row for one. */
+            if (action == porpoise::ui::App::Action::CheckUpdate && !ecam_bridge::request.valid)
             {
                 porpoise::covers::stop(); /* one download at a time: let the check go first */
                 porpoise::update::start_check(g_data + "/latest-release.json");
             }
-            if (action == porpoise::ui::App::Action::InstallUpdate)
+            if (action == porpoise::ui::App::Action::InstallUpdate && !ecam_bridge::request.valid)
             {
                 porpoise::covers::stop();
                 ps5::debug::mark(("main: updating to " + g_release.tag).c_str());
                 porpoise::update::start_install(g_release, install_dir());
             }
-            if (action == porpoise::ui::App::Action::InstallVersion)
+            if (action == porpoise::ui::App::Action::InstallVersion && !ecam_bridge::request.valid)
             {
                 const int pick = g_app.picked_version();
                 if (pick >= 0 && pick < int(g_releases.size()))
