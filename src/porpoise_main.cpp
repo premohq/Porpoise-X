@@ -47,6 +47,7 @@
 #include "porpoise_atomic.hpp"
 #include "porpoise_forwarders.hpp"
 #include "porpoise_core.hpp"
+#include "ecam_bridge.h"
 #include "porpoise_disc.hpp"
 #include "porpoise_forward.hpp"
 #ifdef PORPOISE_DESKTOP
@@ -410,12 +411,13 @@ void on_terminate()
 
 [[noreturn]] void leave(int status)
 {
+    const char* ecam_destination = ecam_bridge::ReturnProgram();
     ps5::debug::mark_value("main: leaving through the shell, status", status);
     porpoise::audio::close();
     porpoise::pad::close();
     ps5::memory::finish();
     std::fflush(nullptr);
-    const int result = sceSystemServiceLoadExec("exit", nullptr);
+    const int result = sceSystemServiceLoadExec(ecam_destination, nullptr);
     ps5::debug::mark_value("main: LoadExec result", result);
     for (;;)
         usleep(100000); /* the shell ends the process asynchronously */
@@ -426,6 +428,7 @@ void on_terminate()
  * Porpoise just closes and the player opens it. */
 [[noreturn]] void restart_porpoise()
 {
+    if (ecam_bridge::request.valid) leave(0);
     ps5::debug::mark("main: restarting");
     porpoise::audio::close();
     porpoise::pad::close();
@@ -2465,6 +2468,7 @@ void mark_start(const char *what)
  * on the PS5, app_crt passes the launch arguments). */
 int main(int argc, char **argv)
 {
+    ecam_bridge::Init(argc, argv, "porpoise");
 #ifdef PORPOISE_DESKTOP
     /* The window first: it also makes the program's folder the working one. */
     if (!porpoise::platform::init(argc, argv))
@@ -2474,7 +2478,8 @@ int main(int argc, char **argv)
     ps5::debug::mark("Porpoise: main() entered");
     /* A home screen forwarder's game (--rom; porpoise_forward.hpp): started
      * straight away once the library is read, with no logo or menus first. */
-    const porpoise::forward::Args forwarded = porpoise::forward::parse(argc, argv);
+    porpoise::forward::Args forwarded = porpoise::forward::parse(argc, argv);
+    if (ecam_bridge::request.valid && !ecam_bridge::request.library) { forwarded.rom = ecam_bridge::request.rom; forwarded.exit_after_game = true; }
     /* Before any thread is started: clone this process's credential, so a Lapy
      * owned-root daemon will free it later (choose_data_dir -> jailbreak). */
     porpoise::jailbreak::prepare();
@@ -2648,6 +2653,7 @@ int main(int argc, char **argv)
                           (forwarded_game ? ": found" : ": not found"))
                              .c_str());
     }
+    if (ecam_bridge::request.valid && !ecam_bridge::request.library && !forwarded_game) leave(2);
     g_app.init(&g_gfx, &g_library, &g_settings, g_settings_path, g_options_path, g_saves_path);
     g_app.set_sys_dir(PORPOISE_APP "/system/dolphin-emu/Sys");
     porpoise::ui::widescreen::set_dir(PORPOISE_APP "/assets/widescreen");
@@ -3386,6 +3392,7 @@ int main(int argc, char **argv)
         porpoise::shots::forget(); /* and a screenshot */
         g_playing = nullptr;
         g_menu_open = false;
+        if (ecam_bridge::request.valid && exit == porpoise::core::Exit::Failed) leave(2);
         if (exit == porpoise::core::Exit::Home)
             leave(0);
         /* --exit-after-game: the forwarded game ended normally, so back to the

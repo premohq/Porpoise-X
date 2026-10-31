@@ -12,6 +12,6 @@
 #define PORPOISE_APP "."
 #define PORPOISE_DATA "./data"
 #else
-#define PORPOISE_APP "/app0"
+#define PORPOISE_APP "/app0/retro/porpoise"
 #define PORPOISE_DATA "/data/porpoise"
 #endif
