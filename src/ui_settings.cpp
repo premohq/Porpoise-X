@@ -95,6 +95,22 @@ const Field kFields[] = {
     {"button_layout", &Settings::button_layout, nullptr, 0, 5},
     {"invert_main", &Settings::invert_main, nullptr, 0, 3},
     {"p1_port", &Settings::p1_port, nullptr, 0, 3},
+    {"gc_port1_device", &Settings::gc_port1_device, nullptr, 0, 2},
+    {"gc_port2_device", &Settings::gc_port2_device, nullptr, 0, 2},
+    {"gc_port3_device", &Settings::gc_port3_device, nullptr, 0, 2},
+    {"gc_port4_device", &Settings::gc_port4_device, nullptr, 0, 2},
+    {"gba_buttons_on", nullptr, &Settings::gba_buttons_on, 0, 1},
+    {"gba_web", nullptr, &Settings::gba_web, 0, 1},
+    {"gba_port1_control", &Settings::gba_port1_control, nullptr, 0, 5},
+    {"gba_port2_control", &Settings::gba_port2_control, nullptr, 0, 5},
+    {"gba_port3_control", &Settings::gba_port3_control, nullptr, 0, 5},
+    {"gba_port4_control", &Settings::gba_port4_control, nullptr, 0, 5},
+    {"gba_buttons_use", &Settings::gba_buttons_use, nullptr, 0, 2},
+    {"gba_modifier", &Settings::gba_modifier, nullptr, 0, porpoise::pad::CtlCount - 1},
+    {"gba_stick_dpad", nullptr, &Settings::gba_stick_dpad, 0, 1},
+    {"gba_show_mode", &Settings::gba_show_mode, nullptr, 0, 2},
+
+    {"gba_always", nullptr, &Settings::gba_always, 0, 1},
     {"invert_c", &Settings::invert_c, nullptr, 0, 3},
     {"stick_sensitivity", &Settings::stick_sensitivity, nullptr, 0, 3},
     {"stick_deadzone", &Settings::stick_deadzone, nullptr, 0, 3},
@@ -193,9 +209,25 @@ bool is_dolphin_key(const std::string &key)
     return key.rfind("dolphin.", 0) == 0 && key.find('.', 8) != std::string::npos;
 }
 
+/* Players 2..4's GBA layouts (gba_p2_buttons, gba_p3_modifier, ...) and the GBAs' windows
+ * (gba_window1..4 = "x y"). */
+bool is_gba_extra_key(const std::string &key)
+{
+    if (key.size() == 11 && key.rfind("gba_window", 0) == 0)
+        return key[10] >= '1' && key[10] <= '4';
+    if (key.size() == 8 && key.rfind("gba_rom", 0) == 0)
+        return key[7] >= '1' && key[7] <= '4';
+    if (key.size() < 8 || key.rfind("gba_p", 0) != 0 || key[5] < '2' || key[5] > '4' || key[6] != '_')
+        return false;
+    const std::string what = key.substr(7);
+    return what == "buttons" || what == "buttons2" || what == "use" || what == "modifier" || what == "stick" ||
+           what == "always";
+}
+
 bool is_text_key(const std::string &key)
 {
-    return key == "border" || key == "online_dns" || is_dolphin_key(key);
+    return key == "border" || key == "online_dns" || key == "gba_buttons" || key == "gba_buttons2" ||
+           is_gba_extra_key(key) || is_dolphin_key(key);
 }
 
 const Field *field(const std::string &key)
@@ -234,6 +266,7 @@ const char *on_off(bool v)
 /* Values the Dolphin core expects, in the order Porpoise lists them. */
 const char *const kCpuClocks[] = {"0.50", "0.60", "0.70", "0.80", "0.90", "1.00", "1.50", "2.00", "2.50", "3.00"};
 const char *const kTextureCache[] = {"128", "512", "0"};
+const char *const kPortDevices[] = {"controller", "gba", "none"};
 /* English first; the core numbers Japanese 0. */
 const int kLanguages[] = {1, 0, 2, 3, 4, 5, 6, 7, 8, 9};
 
@@ -257,6 +290,9 @@ const char *const kManaged[] = {
     /* Off at every launch: Porpoise turns it on itself for two-controller play
      * (porpoise_core.cpp, nunchuk_motion_step). */
     "dolphin_save_load_settings",
+    /* The GameCube ports' devices and the GBA link (patches/dolphin/gba-link.patch). */
+    "dolphin_si_device_port1", "dolphin_si_device_port2", "dolphin_si_device_port3", "dolphin_si_device_port4",
+    "dolphin_gba_combos",
 };
 } // namespace
 
@@ -306,7 +342,7 @@ bool Settings::load(const std::string &path, bool overlay)
                 online_dns = v; /* the console's setting: never a game's own */
             continue;
         }
-        if (is_dolphin_key(k))
+        if (is_dolphin_key(k) || is_gba_extra_key(k))
         {
             set(k, v);
             continue;
@@ -351,6 +387,32 @@ bool Settings::load(const std::string &path, bool overlay)
                 row[i] = std::clamp(int(n), 0, porpoise::pad::CtlCount - 1);
                 c = end;
             }
+            continue;
+        }
+        if (k == "gba_buttons" || k == "gba_buttons2")
+        {
+            int *const target = k == "gba_buttons" ? gba_buttons : gba_buttons2;
+            /* The GBA's buttons: a control for each, in porpoise::pad::GbaInput order. */
+            int row[porpoise::pad::GbaCount];
+            std::copy(target, target + porpoise::pad::GbaCount, row);
+            const char *c = v.c_str();
+            bool ok = true;
+            /* Fewer (an older Porpoise, before Move GBA Screen): the rest keep their defaults. */
+            for (int i = 0; i < porpoise::pad::GbaCount && ok; ++i)
+            {
+                char *end = nullptr;
+                const long n = std::strtol(c, &end, 10);
+                if (end == c)
+                    break;
+                ok = n >= -1 && n < porpoise::pad::CtlCount; /* -1: not on any control */
+                if (ok)
+                {
+                    row[i] = int(n);
+                    c = end;
+                }
+            }
+            if (ok) /* anything else (damaged) keeps what there was */
+                std::copy(std::begin(row), std::end(row), target);
             continue;
         }
         const bool second_set = k.size() == 13 && k.rfind("wiibuttons2_", 0) == 0 && k[12] >= '1' && k[12] <= '4';
@@ -484,6 +546,22 @@ bool Settings::save(const std::string &path) const
             std::fprintf(f, " %d", presets[p][i]);
         std::fprintf(f, "\n");
     }
+    std::fprintf(f, "gba_buttons =");
+    for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+        std::fprintf(f, " %d", gba_buttons[i]);
+    std::fprintf(f, "\ngba_buttons2 =");
+    for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+        std::fprintf(f, " %d", gba_buttons2[i]);
+    std::fprintf(f, "\n");
+    for (int p = 2; p <= 4; ++p)
+        for (const char *what : {"buttons", "buttons2", "use", "modifier", "stick", "always"})
+        {
+            const std::string k = "gba_p" + std::to_string(p) + "_" + what;
+            std::fprintf(f, "%s = %s\n", k.c_str(), get(k).c_str());
+        }
+    for (int w = 1; w <= 4; ++w)
+        for (const std::string k : {"gba_window" + std::to_string(w), "gba_rom" + std::to_string(w)})
+            std::fprintf(f, "%s = %s\n", k.c_str(), get(k).c_str());
     for (int s = 0; s < kWiiButtonSets; ++s)
     {
         std::fprintf(f, "wiibuttons%d =", s + 1);
@@ -532,6 +610,8 @@ bool Settings::save_keys(const std::string &path, const std::vector<std::string>
             std::fprintf(f, "border = %s\n", border.c_str());
         else if (k == "online_dns")
             std::fprintf(f, "online_dns = %s\n", online_dns.c_str());
+        else if (k == "gba_buttons" || k == "gba_buttons2" || is_gba_extra_key(k))
+            std::fprintf(f, "%s = %s\n", k.c_str(), get(k).c_str());
         else if (is_dolphin_key(k) && !get(k).empty())
             std::fprintf(f, "%s = %s\n", k.c_str(), get(k).c_str());
     }
@@ -729,6 +809,82 @@ bool Settings::migrate_game_file(const std::string &path, Settings &global)
 
 bool Settings::set(const std::string &key, const std::string &value)
 {
+    if (is_gba_extra_key(key))
+    {
+        auto numbers = [&](int *out, int count, int lo, int hi) {
+            const char *c = value.c_str();
+            for (int i = 0; i < count; ++i)
+            {
+                char *end = nullptr;
+                const long n = std::strtol(c, &end, 10);
+                if (end == c)
+                    break;
+                out[i] = std::clamp(int(n), lo, hi);
+                c = end;
+            }
+        };
+        if (key.rfind("gba_rom", 0) == 0)
+        {
+            /* "0|1 name": saves beside it, then the file's name (spaces and all). */
+            const int w = key[7] - '1';
+            gba_rom_beside[w] = !value.empty() && value[0] == '1';
+            gba_rom[w] = value.size() > 2 ? value.substr(2) : "";
+            return true;
+        }
+        if (key.rfind("gba_window", 0) == 0)
+        {
+            /* x y size opacity volume muted filter blend speaker smooth; fewer (an older Porpoise)
+             * keep the rest. */
+            const int w = key[10] - '1';
+            int v[10] = {gba_window_x[w],      gba_window_y[w],      gba_window_size[w],
+                         gba_window_opacity[w], gba_window_volume[w], gba_window_muted[w] ? 1 : 0,
+                         gba_window_filter[w],  gba_window_blend[w] ? 1 : 0, gba_window_speaker[w] ? 1 : 0,
+                         gba_window_smooth[w]};
+            numbers(v, 10, -1, 1920);
+            gba_window_filter[w] = std::clamp(v[6], 0, 1);
+            gba_window_blend[w] = v[7] > 0;
+            gba_window_speaker[w] = v[8] > 0;
+            gba_window_smooth[w] = std::clamp(v[9], 0, 1);
+            gba_window_x[w] = v[0];
+            gba_window_y[w] = std::min(v[1], 1080);
+            gba_window_size[w] = std::clamp(v[2], 0, 3);
+            gba_window_opacity[w] = std::clamp(v[3], 0, 6);
+            gba_window_volume[w] = std::clamp(v[4], 0, 10);
+            gba_window_muted[w] = v[5] > 0;
+            return true;
+        }
+        GbaLayout &l = gba_more[key[5] - '2'];
+        const std::string what = key.substr(7);
+        if (what == "buttons")
+            numbers(l.buttons, porpoise::pad::GbaCount, -1, porpoise::pad::CtlCount - 1);
+        else if (what == "buttons2")
+            numbers(l.buttons2, porpoise::pad::GbaCount, -1, porpoise::pad::CtlCount - 1);
+        else if (what == "use")
+            numbers(&l.use, 1, 0, 2);
+        else if (what == "modifier")
+            numbers(&l.modifier, 1, 0, porpoise::pad::CtlCount - 1);
+        else if (what == "always")
+            l.always = as_bool(value);
+        else
+            l.stick_dpad = as_bool(value);
+        return true;
+    }
+    if (key == "gba_buttons" || key == "gba_buttons2")
+    {
+        /* A control for each GBA input, as the settings file has them; fewer keep the rest. */
+        int *const target = key == "gba_buttons" ? gba_buttons : gba_buttons2;
+        const char *c = value.c_str();
+        for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+        {
+            char *end = nullptr;
+            const long n = std::strtol(c, &end, 10);
+            if (end == c)
+                break;
+            target[i] = std::clamp(int(n), -1, porpoise::pad::CtlCount - 1);
+            c = end;
+        }
+        return true;
+    }
     if (key == "border")
     {
         border = value;
@@ -804,6 +960,50 @@ void Settings::copy_keys(const Settings &from, const std::vector<std::string> &k
 
 std::string Settings::get(const std::string &key) const
 {
+    if (is_gba_extra_key(key))
+    {
+        if (key.rfind("gba_window", 0) == 0)
+        {
+            const int w = key[10] - '1';
+            return std::to_string(gba_window_x[w]) + " " + std::to_string(gba_window_y[w]) + " " +
+                   std::to_string(gba_window_size[w]) + " " + std::to_string(gba_window_opacity[w]) + " " +
+                   std::to_string(gba_window_volume[w]) + " " + (gba_window_muted[w] ? "1" : "0") + " " +
+                   std::to_string(gba_window_filter[w]) + " " + (gba_window_blend[w] ? "1" : "0") + " " +
+                   (gba_window_speaker[w] ? "1" : "0") + " " + std::to_string(gba_window_smooth[w]);
+        }
+        if (key.rfind("gba_rom", 0) == 0)
+        {
+            const int w = key[7] - '1';
+            return std::string(gba_rom_beside[w] ? "1 " : "0 ") + gba_rom[w];
+        }
+        const GbaLayout &l = gba_more[key[5] - '2'];
+        const std::string what = key.substr(7);
+        auto list = [](const int *v) {
+            std::string out;
+            for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+                out += (i ? " " : "") + std::to_string(v[i]);
+            return out;
+        };
+        if (what == "buttons")
+            return list(l.buttons);
+        if (what == "buttons2")
+            return list(l.buttons2);
+        if (what == "use")
+            return std::to_string(l.use);
+        if (what == "modifier")
+            return std::to_string(l.modifier);
+        if (what == "always")
+            return l.always ? "1" : "0";
+        return l.stick_dpad ? "1" : "0";
+    }
+    if (key == "gba_buttons" || key == "gba_buttons2")
+    {
+        const int *const from = key == "gba_buttons" ? gba_buttons : gba_buttons2;
+        std::string v;
+        for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+            v += (i ? " " : "") + std::to_string(from[i]);
+        return v;
+    }
     if (key == "border")
         return border;
     if (key == "online_dns")
@@ -1063,6 +1263,13 @@ std::vector<std::pair<std::string, std::string>> Settings::core_options() const
         /* Dolphin's own yellow notes over the game ("Saved to memory card"
          * and the like): Porpoise shows what matters in its own menus. */
         {"dolphin_osd_enabled", "disabled"},
+        /* The GameCube ports, as Dolphin's own Controllers setting. The GBA's buttons are
+         * Porpoise's (porpoise::pad::GbaConfig), so the core's own combos are off. */
+        {"dolphin_si_device_port1", kPortDevices[std::clamp(gc_port1_device, 0, 2)]},
+        {"dolphin_si_device_port2", kPortDevices[std::clamp(gc_port2_device, 0, 2)]},
+        {"dolphin_si_device_port3", kPortDevices[std::clamp(gc_port3_device, 0, 2)]},
+        {"dolphin_si_device_port4", kPortDevices[std::clamp(gc_port4_device, 0, 2)]},
+        {"dolphin_gba_combos", "disabled"},
     };
 }
 
@@ -1099,5 +1306,34 @@ bool Settings::write_core_options(const std::string &options_ini) const
         return false;
     std::fputs(text.c_str(), f);
     return finish_atomic(f, options_ini);
+}
+
+porpoise::pad::GbaConfig Settings::gba_player_config(int player) const
+{
+    GbaLayoutRef l = const_cast<Settings *>(this)->gba_layout(player);
+    porpoise::pad::GbaConfig c;
+    c.modifier = std::clamp(*l.modifier, 0, porpoise::pad::CtlCount - 1);
+    c.stick_dpad = *l.stick_dpad;
+    c.direct = *l.always; /* always the GBA: no GBA button to hold */
+    const int *buttons = *l.use == 2 ? l.buttons2 : *l.use == 1 ? l.buttons : nullptr;
+    if (buttons) /* Porpoise's own: GbaConfig's defaults */
+        for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+            c.control[i] = static_cast<std::int8_t>(std::clamp(buttons[i], -1, porpoise::pad::CtlCount - 1));
+    return c;
+}
+
+bool Settings::port_has_gba(int port) const
+{
+    const int ports[] = {gc_port1_device, gc_port2_device, gc_port3_device, gc_port4_device};
+    return port >= 0 && port < 4 && ports[port] == 1;
+}
+
+int Settings::gba_port() const
+{
+    const int ports[] = {gc_port1_device, gc_port2_device, gc_port3_device, gc_port4_device};
+    for (int i = 0; i < 4; ++i)
+        if (ports[i] == 1)
+            return i;
+    return -1;
 }
 } // namespace porpoise

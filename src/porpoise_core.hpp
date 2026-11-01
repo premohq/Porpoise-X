@@ -93,6 +93,34 @@ void set_stick_invert(int main_stick, int c_stick);
 /* 4.0: the GameCube port player 1's controller is in (0..3); the player who
  * would be there takes port 1. Takes effect at the next frame, mid-game too. */
 void set_player1_port(int port);
+/* The integrated GBAs (GameCube games). For each GameCube port, who plays its GBA: -2 no GBA
+ * there, -1 nobody (the page in a browser only), 0..3 a player (their GBA buttons,
+ * porpoise::pad::State::gba_keys, go to it each frame; Reset GBA too; its sound on their
+ * controller with Playback::gba_speaker). Null: no GBAs. */
+void set_gba_controls(const int who[4]);
+int gba_player(int port); /* as set_gba_controls had it */
+/* A GBA's newest frame when it is newer than seq (15-bit: red bits 0-4, green 5-9, blue 10-14);
+ * false when nothing is new or there is no GBA there. On the game's thread (the frame hook). */
+bool gba_frame(int port, std::vector<std::uint16_t> &pixels, unsigned &width, unsigned &height, unsigned &seq);
+/* A game is running with a GBA the core can show. */
+bool has_gba();
+/* The GBAs' page in a browser on the network (on by default); off, they run with none. */
+void set_gba_web(bool on);
+/* A GBA (port 0..3, or -1 every one) starts over (Dolphin's own GBA Reset); the game goes on. */
+void reset_gba(int port = -1);
+/* A GBA's (port 0..3's) volume (0..100%) and mute, in the TV's sound and the controller's alike. */
+void set_gba_volume(int port, int percent, bool muted);
+/* What Dolphin's GBA window can do, for the GBA in port (0..3): dolphin_gba_request's what (2 put a
+ * game in, 3 the same with its save beside it, 4/5 load / save an mGBA state, 6/7 import / export
+ * a .sav, 8 scan an e-Reader card) with a file's path. */
+void gba_request(int port, int what, const std::string &path);
+/* Disconnect: the GBA's link cable out, or in again; whether it is in. */
+void toggle_gba_link(int port);
+bool gba_connected(int port);
+/* The game each GBA starts the game with ("" the BIOS alone), put in as the game starts. */
+void set_gba_rom(int port, const std::string &path, bool saves_beside);
+/* A GBA's sound on its player's controller speaker (Playback::gba_speaker opens them). */
+void set_gba_speaker(int port, bool on);
 /* The control stick's feel (Settings::stick_sensitivity, stick_deadzone). */
 void set_stick_shape(int sensitivity, int deadzone);
 /* Fast forward: 1 is normal speed, 2 or 4 run that many frames for each shown. */
@@ -142,6 +170,9 @@ struct Playback
     /* The Wii Remotes' speakers on the controllers' (porpoise_speaker): the
      * ports are opened by the caller; this starts and stops the sending. */
     bool controller_speakers = false;
+    /* The GBA's sound on player 1's controller speaker instead of the TV (a GameCube game with a
+     * GBA; the ports opened by the caller, as above). */
+    bool gba_speaker = false;
     /* 2.1.2: the game's sound pulled from Dolphin's mixer, which fills the
      * gaps when a game runs slow (Settings > Audio; off is Classic, 2.1's). */
     bool audio_pull = true;

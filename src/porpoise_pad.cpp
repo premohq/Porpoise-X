@@ -221,6 +221,9 @@ struct Slot
     int triggers = -1;       /* the trigger feel this controller has (-1 not set yet) */
 };
 
+/* ---- the GBA ---- */
+GbaConfig g_gba[kMaxPlayers];
+
 /* ---- the Wii Remote ---- */
 WiiConfig g_wii;
 bool g_nunchuk_motion = false; /* the core has the Nunchuk device's motion (set_nunchuk_motion) */
@@ -763,6 +766,86 @@ Motion read_motion(Slot &slot, std::int32_t count)
 
 bool g_ff_buttons = true; /* set_fast_forward_buttons */
 
+/* Player 1 with the GBA's modifier held: the controls are the GBA's buttons,
+ * and nothing goes to the game (its pad reads as let go). Ahead of the touch
+ * pad's shortcuts, so the touch pad can be the modifier, or a GBA button. */
+/* late: called after the touch pad's shortcuts (fast forward, quick saves, the screenshot, the
+ * menu) have taken their buttons, for a player who is the GBA (direct): they keep those, and the
+ * rest of the controller is the GBA. Early (late false): a player holding their GBA button, ahead
+ * of the shortcuts. */
+bool read_gba(Slot &slot, std::uint32_t raw, const PadSample &sample, State &next, bool late = false)
+{
+    const long index = &slot - g_slots;
+    if (index < 0 || index >= kMaxPlayers)
+        return false;
+    const GbaConfig &g_gba_ = g_gba[index];
+    if (g_gba_.direct != late)
+        return false;
+    const bool held = g_gba_.direct || (g_gba_.modifier >= 0 && g_gba_.modifier < CtlCount &&
+                                        (raw & kControlPadBit[g_gba_.modifier]));
+    if (!g_gba_.active || !held)
+        return false;
+    next.connected = true;
+    next.gba_held = true;
+    if (!late)
+        next.ps_menu_combo = (raw & (pad_options | pad_touch_pad)) == (pad_options | pad_touch_pad);
+    for (int c = 0; c < CtlCount; ++c)
+        if (raw & kControlPadBit[c])
+            next.buttons |= kControlButton[c];
+    for (int i = 0; i < GbaCount; ++i)
+    {
+        const int c = g_gba_.control[i];
+        if (c < 0 || c >= CtlCount || (!g_gba_.direct && c == g_gba_.modifier) || !(raw & kControlPadBit[c]))
+            continue;
+        if (i < kGbaKeys)
+            next.gba_keys |= static_cast<std::uint16_t>(1u << i);
+        else if (i == GbaShowScreen)
+            next.gba_show = true;
+        else if (i == GbaMoveScreen)
+            next.gba_moving = true;
+        else if (i == GbaAdjustOpacity)
+            next.gba_opacity = true;
+        else if (i == GbaReset)
+            next.gba_reset = true;
+        else if (i == GbaMute)
+            next.gba_mute = true;
+        else if (i == GbaVolume)
+            next.gba_volume = true;
+        else if (i == GbaDisconnect)
+            next.gba_disconnect = true;
+        else if (i == GbaQuickSave)
+            next.gba_quick_save = true;
+        else if (i == GbaQuickLoad)
+            next.gba_quick_load = true;
+    }
+    if (next.gba_moving || next.gba_opacity || next.gba_volume)
+    {
+        next.gba_move_x = stick(sample.left_x);
+        next.gba_move_y = stick(sample.left_y);
+    }
+    else if (g_gba_.stick_dpad)
+    {
+        constexpr int kPush = 16000; /* past half way, as the Wii's stick D-pad */
+        const std::int16_t x = stick(sample.left_x), y = stick(sample.left_y);
+        if (y < -kPush)
+            next.gba_keys |= 1u << GbaUp;
+        if (y > kPush)
+            next.gba_keys |= 1u << GbaDown;
+        if (x < -kPush)
+            next.gba_keys |= 1u << GbaLeft;
+        if (x > kPush)
+            next.gba_keys |= 1u << GbaRight;
+    }
+    if (late)
+        return true; /* the shortcuts keep their own bookkeeping */
+    /* The touch pad pressed as part of this isn't the game's Select (Minus)
+     * when it is let go. */
+    slot.touch_combo = true;
+    slot.touch_pulse = 0;
+    slot.raw_prev = raw;
+    return true;
+}
+
 State read_slot(Slot &slot)
 {
     const std::int32_t count = scePadRead(slot.handle, g_samples, sample_capacity);
@@ -790,6 +873,8 @@ State read_slot(Slot &slot)
     std::uint8_t right_trigger = newest->right_trigger;
     std::uint8_t left_trigger = newest->left_trigger;
     State next;
+    if (read_gba(slot, b, *newest, next))
+        return next;
     const bool quick = g_quick_buttons.load(std::memory_order_relaxed);
     const bool shot = g_shot_buttons.load(std::memory_order_relaxed);
     const bool touch_shortcuts = g_ff_buttons || quick || shot;
@@ -875,6 +960,12 @@ State read_slot(Slot &slot)
     }
     else
         slot.turbo_tick = 0;
+    /* A player who is the GBA: what the shortcuts left is the GBA's (the game gets nothing). */
+    if (read_gba(slot, b, *newest, next, true))
+    {
+        next.ps_menu_combo = (newest->buttons & (pad_options | pad_touch_pad)) == (pad_options | pad_touch_pad);
+        return next;
+    }
     next.connected = true;
     for (int c = 0; c < CtlCount; ++c)
         if (b & kControlPadBit[c])
@@ -1149,6 +1240,24 @@ int connected_count()
     for (int player = 0; player < kMaxPlayers; ++player)
         n += connected(player) ? 1 : 0;
     return n;
+}
+
+GbaConfig gba_defaults()
+{
+    return GbaConfig{};
+}
+
+void set_gba(int player, const GbaConfig &config)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    if (player >= 0 && player < kMaxPlayers)
+        g_gba[player] = config;
+}
+
+GbaConfig gba(int player)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    return player >= 0 && player < kMaxPlayers ? g_gba[player] : GbaConfig{};
 }
 
 void set_wii(const WiiConfig &config)

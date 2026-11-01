@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <pthread.h>
 
@@ -46,6 +47,7 @@ struct State
     pthread_t thread{};
     bool running = false;
     std::atomic<bool> stop{false};
+    std::atomic<bool> smooth{false}; /* set_smooth */
     double position[kPlayers] = {};
     std::int16_t last[kPlayers] = {};
 };
@@ -75,10 +77,20 @@ void *worker(void *)
             else
             {
                 const double step = double(got) / double(kGrain);
+                const bool smooth = s.smooth.load(std::memory_order_relaxed);
+                auto sample = [&](std::size_t at) { return (int(stereo[at * 2]) + int(stereo[at * 2 + 1])) / 2; };
                 for (std::uint32_t i = 0; i < kGrain; ++i)
                 {
-                    const std::size_t at = std::min(got - 1, std::size_t(double(i) * step));
-                    mono[i] = std::int16_t((int(stereo[at * 2]) + int(stereo[at * 2 + 1])) / 2);
+                    const double pos = double(i) * step;
+                    const std::size_t at = std::min(got - 1, std::size_t(pos));
+                    if (!smooth || at + 1 >= got)
+                        mono[i] = std::int16_t(sample(at));
+                    else
+                    {
+                        /* Between this sample and the next, as far along as the speaker's is. */
+                        const double f = pos - double(at);
+                        mono[i] = std::int16_t(std::lround(sample(at) * (1.0 - f) + sample(at + 1) * f));
+                    }
                 }
             }
             if (sceAudioOutOutput(s.port[p], mono) < 0)
@@ -96,6 +108,11 @@ void *worker(void *)
     return nullptr;
 }
 } // namespace
+
+void set_smooth(bool smooth)
+{
+    s.smooth.store(smooth);
+}
 
 int open_ports()
 {

@@ -49,6 +49,7 @@ enum RowAction
     kRowResetAll,
     kRowResetGame,
     kRowMapping,
+    kRowMappingGba, /* Customize Buttons, on the GBA's tab */
     kRowWiiGuide,
     kRowWiiSetup,
     kRowRecommended,

@@ -243,6 +243,8 @@ void App::begin_mapping()
     const int own = map_target_ ? map_target_->preset_in_use() : -1;
     map_preset_ = own >= 0 ? own : 0;
     map_wii_slot_ = map_target_ ? std::clamp(map_target_->wii_buttons_use, 0, 2) : 1;
+    map_gba_player_ = 0;
+    map_gba_slot_ = map_target_ ? std::clamp(map_target_->gba_buttons_use, 0, 2) : 1;
     map_row_ = own >= 0 ? kFirstButton : kSelectRow;
     map_capture_ = false;
     map_note_.clear();
@@ -358,6 +360,8 @@ void App::start_preset_from(int layout)
 
 App::Action App::update_mapping(bool up, bool down, bool left, bool right)
 {
+    if (map_kind_ == 5) /* kMapKindGba */
+        return update_gba_mapping(up, down, left, right);
     if (map_kind_ > 0)
         return update_wii_mapping(up, down, left, right);
     const bool global = map_target_ == settings_;
@@ -458,6 +462,11 @@ void App::draw_mapping(double time)
     Gfx &g = *g_;
     if (!map_target_)
         return;
+    if (map_kind_ == 5) /* kMapKindGba */
+    {
+        draw_gba_mapping(time);
+        return;
+    }
     if (map_kind_ > 0)
     {
         draw_wii_mapping(time);
@@ -2021,10 +2030,12 @@ namespace
 /* The four Wii controllers the player can set buttons for, in tab order after
  * GameCube (Settings::wii_buttons, porpoise::pad::wii_button_set). */
 constexpr int kWiiSetController[4] = {WiiRemoteNunchuk, WiiRemote, WiiSideways, WiiClassic};
-constexpr const char *kMapKindNames[5] = {"GameCube", "Remote + Nunchuk", "Remote", "Remote Sideways",
-                                          "Classic Controller"};
+constexpr const char *kMapKindNames[6] = {"GameCube", "Remote + Nunchuk", "Remote", "Remote Sideways",
+                                          "Classic Controller", "Game Boy Advance"};
+constexpr int kMapKinds = 6;
+constexpr int kMapKindGba = 5; /* the GBA on a GameCube port (Settings::gba_*) */
 /* The tabs' short names, across the top of the list. */
-constexpr const char *kMapKindTabs[5] = {"GameCube", "Remote + Nunchuk", "Remote", "Sideways", "Classic"};
+constexpr const char *kMapKindTabs[6] = {"GameCube", "Remote + Nunchuk", "Remote", "Sideways", "Classic", "GBA"};
 
 /* Porpoise's own layout for a set, held face up: the rows of the list. */
 WiiLayout base_layout(int set)
@@ -2041,7 +2052,7 @@ bool App::switch_map_kind()
 {
     if (!pressed(BtnL1 | BtnR1))
         return false;
-    map_kind_ = (map_kind_ + (pressed(BtnL1) ? 4 : 1)) % 5;
+    map_kind_ = (map_kind_ + (pressed(BtnL1) ? kMapKinds - 1 : 1)) % kMapKinds;
     map_row_ = map_kind_ > 0 ? 0 : kSelectRow;
     map_capture_ = false;
     map_note_.clear();
@@ -2055,11 +2066,11 @@ void App::draw_map_tabs()
     Gfx &g = *g_;
     const float px = 950, pw = 880, cy = 136 + 34;
     float size = ts(22), total = 0;
-    float widths[5];
+    float widths[kMapKinds];
     for (int pass = 0; pass < 2; ++pass)
     {
         total = 0;
-        for (int i = 0; i < 5; ++i)
+        for (int i = 0; i < kMapKinds; ++i)
         {
             widths[i] = g.measure(Font::SemiBold, size, tr(kMapKindTabs[i])) + 30;
             total += widths[i];
@@ -2070,7 +2081,7 @@ void App::draw_map_tabs()
     }
     float x = px + (pw - total) * 0.5f;
     g.panel(x - 4, cy - 22, total + 8, 44, rgba(0x07102E, 0.55f), 0.8f, 22, rgba(0x3D4F9E, 0.8f), 1.2f);
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < kMapKinds; ++i)
     {
         const bool on = i == map_kind_;
         if (on)
@@ -2340,5 +2351,499 @@ void App::draw_wii_mapping(double time)
                       {Glyph::Cross, map_row_ == 0 ? "Use" : bind < base.count ? "Change" : "Start Over"},
                       {Glyph::Circle, "Back"}},
                      {{kKeyL1R1, "Controller"}}, "");
+}
+
+/* ---- Customize buttons: the GBA's ----------------------------------------------------------- */
+
+namespace
+{
+/* Which buttons (Porpoise's, Mine 1, Mine 2), the GBA button, each GBA input, then the stick, the
+ * show mode, Start Over. */
+constexpr int kGbaRowPlayer = 0; /* whose: player 1..4, each with a whole layout of their own */
+constexpr int kGbaRowSlot = 1;
+constexpr int kGbaRowModifier = 2;
+constexpr int kGbaRowFirstInput = 3;
+constexpr int kGbaRowStick = kGbaRowFirstInput + GbaCount;
+constexpr int kGbaRowAlways = kGbaRowStick + 1; /* always the GBA: no GBA button to hold */
+constexpr int kGbaRowShowMode = kGbaRowAlways + 1;
+constexpr int kGbaRowStartOver = kGbaRowShowMode + 1;
+constexpr int kGbaRows = kGbaRowStartOver + 1;
+
+const char *gba_slot_name(int slot)
+{
+    return slot == 0 ? "Porpoise's Set" : slot == 1 ? "Mine 1" : "Mine 2";
+}
+
+/* A slot's buttons in a player's layout (1, 2), null for Porpoise's own (0). */
+int *gba_slot_of(const Settings::GbaLayoutRef &l, int slot)
+{
+    return slot == 1 ? l.buttons : slot == 2 ? l.buttons2 : nullptr;
+}
+
+/* A slot's buttons as a config (Porpoise's own for slot 0), with the player's GBA button. */
+GbaConfig gba_slot_config(const Settings::GbaLayoutRef &l, int slot)
+{
+    GbaConfig c = porpoise::pad::gba_defaults();
+    c.modifier = std::clamp(*l.modifier, 0, CtlCount - 1);
+    c.stick_dpad = *l.stick_dpad;
+    if (const int *b = gba_slot_of(l, slot))
+        for (int i = 0; i < GbaCount; ++i)
+            c.control[i] = static_cast<std::int8_t>(std::clamp(b[i], -1, CtlCount - 1));
+    return c;
+}
+
+/* The GBA inputs in the GBA tab's order (saved by GbaInput, so the order is only how they're
+ * shown): the GBA's own buttons, the screen's, the sound's, then Reset and Disconnect together and
+ * the quick states. */
+int gba_row_input(int row)
+{
+    static const int kOrder[GbaCount] = {GbaA,           GbaB,          GbaSelect,       GbaStart,         GbaRight,
+                                         GbaLeft,        GbaUp,         GbaDown,         GbaR,             GbaL,
+                                         GbaShowScreen,  GbaMoveScreen, GbaAdjustOpacity, GbaVolume,       GbaMute,
+                                         GbaReset,       GbaDisconnect, GbaQuickSave,    GbaQuickLoad};
+    static_assert(GbaCount == 19, "every GbaInput has a place in the GBA tab");
+    return row >= 0 && row < GbaCount ? kOrder[row] : 0;
+}
+
+const char *gba_input_name(int input)
+{
+    static const char *const kNames[GbaCount] = {"A",          "B",         "Select",   "Start",
+                                                 "D-Pad Right", "D-Pad Left", "D-Pad Up", "D-Pad Down",
+                                                 "R",          "L",         "Show GBA Screen", "Move GBA Screen",
+                                                 "Adjust GBA Opacity", "Reset GBA",       "Mute GBA",
+                                                 "GBA Volume",         "Disconnect GBA",  "Quick Save GBA State",
+                                                 "Quick Load GBA State"};
+    return input >= 0 && input < GbaCount ? kNames[input] : "";
+}
+
+/* A GBA input's chip: its letter or word, an arrow for the D-pad. */
+const char *gba_input_chip(int input)
+{
+    static const char *const kChips[GbaCount] = {"A",   "B", "SEL", "START", "", "",     "",     "",
+                                                 "R",   "L", "TV",  "MOVE",  "%", "RESET", "MUTE", "VOL", "LINK",
+                                                 "QS",  "QL"};
+    return input >= 0 && input < GbaCount ? kChips[input] : "";
+}
+
+float gba_arrow(int input)
+{
+    switch (input)
+    {
+    case GbaDown: return kPi;
+    case GbaLeft: return -kPi * 0.5f;
+    case GbaRight: return kPi * 0.5f;
+    default: return 0;
+    }
+}
+
+std::uint32_t gba_input_colour(int input)
+{
+    if (input == GbaA || input == GbaB)
+        return 0xB9A6FF; /* the GBA's lilac face buttons */
+    if (input == GbaShowScreen || input == GbaMoveScreen || input == GbaAdjustOpacity)
+        return 0x7CF0A6;
+    if (input == GbaReset || input == GbaDisconnect)
+        return 0xFF8A8A;
+    if (input == GbaMute || input == GbaVolume)
+        return 0xFFC85C;
+    if (input == GbaQuickSave || input == GbaQuickLoad)
+        return 0x8BD9FF;
+    if (input >= GbaRight && input <= GbaDown)
+        return 0x9AA8C7;
+    return 0xDCE3F5;
+}
+} // namespace
+
+/* One chip on the picture: a GBA input, or (input < 0) the GBA button itself. */
+void App::gba_chip(int input, float cx, float cy, float ch, float alpha)
+{
+    Gfx &g = *g_;
+    const std::string label = input < 0 ? std::string("GBA") : std::string(gba_input_chip(input));
+    const float cw = label.size() <= 1 ? ch : g.measure(Font::Bold, ch * 0.46f, label) + ch * 0.8f;
+    const std::uint32_t colour = input < 0 ? 0xFFC85C : gba_input_colour(input);
+    g.panel(cx - cw * 0.5f, cy - ch * 0.5f, cw, ch, with_alpha(rgba(colour), 0.97f * alpha), 0.8f, ch * 0.5f,
+            with_alpha(kWhite, 0.85f * alpha), 1.6f, 6, 0.35f);
+    const Color ink = with_alpha(rgba(0x0A1236), alpha);
+    if (label.empty())
+        g.glyph(Glyph::Arrow, cx, cy, ch * 0.5f, ink, gba_arrow(input));
+    else
+        g.text_mid(Font::Bold, label.size() == 1 ? ch * 0.62f : ch * 0.46f, cx, cy, ink, Align::Center, label);
+}
+
+/* The DualSense with the GBA's buttons on it, and the GBA button (held for all of them). */
+void App::draw_gba_pad(const GbaConfig &gba, float bx, float by, float art_h, float alpha)
+{
+    Gfx &g = *g_;
+    const float k = art_h / kArtW;
+    const float bw = kArtW * k, bh = kArtH * k;
+    if (!pad_art_tried_)
+    {
+        pad_art_tried_ = true;
+        pad_art_ = g.texture_file(g.asset_dir() + "/ui/dualsense.png");
+    }
+    if (pad_art_)
+        g.image(pad_art_, bx, by, bw, bh, g.tone(with_alpha(rgba(0xDDEBFF), alpha)));
+    const float chip_h = std::clamp(52 * k / 0.48f, 24.0f, 44.0f);
+    auto shoulder = [](int c, float &u, float &v) {
+        switch (c)
+        {
+        case CtlL2: u = 300; v = 18; return true;
+        case CtlL1: u = 110; v = 128; return true;
+        case CtlR2: u = 1100; v = 18; return true;
+        case CtlR1: u = 1290; v = 128; return true;
+        default: return false;
+        }
+    };
+    auto put = [&](int control, int input) {
+        if (control < 0 || control >= CtlCount)
+            return;
+        float u, v;
+        if (shoulder(control, u, v))
+        {
+            const float sx = bx + kSpots[control].x * k, sy = by + (kSpots[control].y - 14) * k;
+            const float tx = bx + u * k, ty = by + v * k;
+            const float dx = tx - sx, dy = ty - sy, len = std::sqrt(dx * dx + dy * dy);
+            if (len > 1)
+            {
+                const float nx = -dy / len * 1.3f, ny = dx / len * 1.3f;
+                const Corner c[4] = {{sx + nx, sy + ny, 1}, {tx + nx, ty + ny, 1}, {tx - nx, ty - ny, 1},
+                                     {sx - nx, sy - ny, 1}};
+                g.quad3d(nullptr, c, len, 2.6f, with_alpha(rgba(0x8BD9FF), 0.85f * alpha), 0, false, false);
+            }
+            g.blob(sx, sy, 18, 18, with_alpha(rgba(0x8BD9FF), 0.9f * alpha));
+            gba_chip(input, tx, ty, chip_h, alpha);
+            return;
+        }
+        gba_chip(input, bx + kSpots[control].x * k, by + kSpots[control].y * k, chip_h, alpha);
+    };
+    for (int i = 0; i < GbaCount; ++i)
+        if (gba.control[i] != gba.modifier)
+            put(gba.control[i], i);
+    put(gba.modifier, -1);
+    if (gba.stick_dpad)
+    {
+        /* The left stick: a word just below it. */
+        const float cx = bx + 525 * k, cy = by + 468 * k + chip_h * 1.2f;
+        const std::string t = tr("GBA D-Pad");
+        const float tw = g.measure(Font::SemiBold, ts(20), t) + 24;
+        g.panel(cx - tw * 0.5f, cy - 16, tw, 32, with_alpha(rgba(0x13308A), 0.94f * alpha), 0.8f, 16,
+                with_alpha(rgba(0x8BD9FF), 0.9f * alpha), 1.4f);
+        g.text_mid(Font::SemiBold, ts(20), cx, cy, with_alpha(kWhite, alpha), Align::Center, t);
+    }
+}
+
+App::Action App::update_gba_mapping(bool up, bool down, bool left, bool right)
+{
+    /* What opened the screen: every game (Settings) or one game (its own settings). */
+    Settings &s = *map_target_;
+    const Settings::GbaLayoutRef L = s.gba_layout(map_gba_player_); /* the player being edited's */
+    const Action changed = map_target_ == settings_ ? Action::SettingsChanged : Action::None;
+    auto saved = [&](const std::string &note) {
+        map_note_ = note;
+        map_note_time_ = time_;
+        if (map_gba_player_ == 0)
+            for (const char *key : {"gba_buttons", "gba_buttons2", "gba_buttons_use", "gba_modifier",
+                                    "gba_stick_dpad", "gba_always", "gba_show_mode"})
+                save_mapping(true, key);
+        else
+        {
+            const std::string p = "gba_p" + std::to_string(map_gba_player_ + 1) + "_";
+            for (const char *what : {"buttons", "buttons2", "use", "modifier", "stick", "always"})
+                save_mapping(true, (p + what).c_str());
+            save_mapping(true, "gba_show_mode");
+        }
+        return changed;
+    };
+    if (map_capture_)
+    {
+        if (time_ - map_capture_start_ > kCaptureSeconds)
+        {
+            map_capture_ = false;
+            map_note_ = tr("Nothing pressed; the button is unchanged.");
+            map_note_time_ = time_;
+            return Action::None;
+        }
+        if (!map_armed_)
+        {
+            map_armed_ = (raw_held_ & 0xFFFFu) == 0;
+            if (map_armed_)
+                map_capture_start_ = time_;
+            return Action::None;
+        }
+        const std::uint32_t fresh = (raw_held_ & ~raw_prev_) & 0xFFFFu;
+        for (int c = 0; c < CtlCount && fresh; ++c)
+            if (fresh & control_bit(c))
+            {
+                map_capture_ = false;
+                sfx(Sound::LaunchGame);
+                if (map_row_ == kGbaRowModifier)
+                {
+                    /* A GBA button that was on it takes the GBA button's old control. */
+                    for (int *set : {L.buttons, L.buttons2})
+                        for (int i = 0; i < GbaCount; ++i)
+                            if (set[i] == c)
+                                set[i] = *L.modifier;
+                    *L.modifier = c;
+                    return saved(trf("The GBA button is now {control}.", {{"control", control_name(c)}}));
+                }
+                const int input = gba_row_input(map_row_ - kGbaRowFirstInput);
+                if (c == *L.modifier)
+                {
+                    map_note_ = tr("That's the GBA button: pick another, or move the GBA button first.");
+                    map_note_time_ = time_;
+                    return Action::None;
+                }
+                /* Whatever GBA input was on the pressed control takes this one's old place. */
+                int *const set = gba_slot_of(L, map_gba_slot_);
+                if (!set)
+                    return Action::None;
+                for (int i = 0; i < GbaCount; ++i)
+                    if (i != input && set[i] == c)
+                        set[i] = set[input];
+                set[input] = c;
+                *L.use = map_gba_slot_; /* what was just made is what plays */
+                return saved(trf("{button} is now on {control}.",
+                                 {{"button", tr(gba_input_name(input))}, {"control", control_name(c)}}));
+            }
+        return Action::None;
+    }
+    if (switch_map_kind())
+        return Action::None;
+    if (up && map_row_ > 0)
+    {
+        --map_row_;
+        sfx(Sound::MenuScroll);
+    }
+    if (down && map_row_ + 1 < kGbaRows)
+    {
+        ++map_row_;
+        sfx(Sound::MenuScroll);
+    }
+    if (pressed(BtnCircle))
+    {
+        map_kind_ = 0;
+        close_mapping();
+        return Action::None;
+    }
+    if (map_row_ == kGbaRowPlayer && (left || right))
+    {
+        map_gba_player_ = (map_gba_player_ + (left ? 3 : 1)) % 4;
+        map_gba_slot_ = std::clamp(*s.gba_layout(map_gba_player_).use, 0, 2);
+        sfx(Sound::MovingTab);
+        return Action::None;
+    }
+    if (map_row_ == kGbaRowPlayer)
+        return Action::None;
+    if (map_row_ == kGbaRowSlot && (left || right))
+    {
+        map_gba_slot_ = (map_gba_slot_ + (left ? 2 : 1)) % 3;
+        sfx(Sound::MovingTab);
+        return Action::None;
+    }
+    if (map_row_ == kGbaRowSlot && pressed(BtnCross))
+    {
+        *L.use = map_gba_slot_;
+        sfx(Sound::LaunchGame);
+        return saved(trf("GBA buttons: {name}.", {{"name", tr(gba_slot_name(map_gba_slot_))}}));
+    }
+    const bool flip = pressed(BtnCross) || left || right;
+    if (map_row_ == kGbaRowStick && flip)
+    {
+        *L.stick_dpad = !*L.stick_dpad;
+        sfx(Sound::MovingTab);
+        return saved(tr(*L.stick_dpad ? "The left stick is the GBA's D-pad too, with the GBA button held."
+                                         : "The left stick does nothing for the GBA."));
+    }
+    if (map_row_ == kGbaRowAlways && flip)
+    {
+        *L.always = !*L.always;
+        sfx(Sound::MovingTab);
+        return saved(tr(*L.always ? "Always the GBA: no GBA button to hold for the GBA this player plays."
+                                  : "Hold the GBA button to play the GBA."));
+    }
+    if (map_row_ == kGbaRowShowMode && flip)
+    {
+        s.gba_show_mode = (std::clamp(s.gba_show_mode, 0, 2) + (left ? 2 : 1)) % 3;
+        sfx(Sound::MovingTab);
+        return saved(tr(s.gba_show_mode == 2   ? "The GBA's screen is always on the TV."
+                        : s.gba_show_mode == 1 ? "Each press shows or hides the GBA's screen."
+                                               : "The GBA's screen shows while its button is held."));
+    }
+    if (pressed(BtnSquare) && map_row_ >= kGbaRowFirstInput && map_row_ < kGbaRowStick)
+    {
+        /* Square: the input on no control at all. */
+        int *const own = gba_slot_of(L, map_gba_slot_);
+        if (!own)
+        {
+            map_note_ = tr("Porpoise's buttons stay as they are: pick Mine 1 or Mine 2 to make your own.");
+            map_note_time_ = time_;
+            return Action::None;
+        }
+        const int input = gba_row_input(map_row_ - kGbaRowFirstInput);
+        own[input] = -1;
+        *L.use = map_gba_slot_;
+        sfx(Sound::DetailsFlip);
+        return saved(trf("{button} is on no button now.", {{"button", tr(gba_input_name(input))}}));
+    }
+    if (!pressed(BtnCross))
+        return Action::None;
+    int *const set = gba_slot_of(L, map_gba_slot_);
+    if (!set && map_row_ != kGbaRowModifier)
+    {
+        map_note_ = tr("Porpoise's buttons stay as they are: pick Mine 1 or Mine 2 to make your own.");
+        map_note_time_ = time_;
+        sfx(Sound::DetailsFlip);
+        return Action::None;
+    }
+    if (map_row_ == kGbaRowStartOver)
+    {
+        const GbaConfig d = porpoise::pad::gba_defaults();
+        *L.modifier = d.modifier;
+        for (int i = 0; i < GbaCount; ++i)
+            set[i] = d.control[i];
+        *L.stick_dpad = d.stick_dpad;
+        sfx(Sound::LaunchGame);
+        return saved(tr("The GBA is back to Porpoise's layout."));
+    }
+    map_capture_ = true;
+    map_armed_ = false;
+    map_capture_start_ = time_;
+    sfx(Sound::DetailsFlip);
+    return Action::None;
+}
+
+void App::draw_gba_mapping(double)
+{
+    Gfx &g = *g_;
+    const Settings &s = *map_target_;
+    const Settings::GbaLayoutRef L = const_cast<Settings &>(s).gba_layout(map_gba_player_);
+    const GbaConfig gba = gba_slot_config(L, map_gba_slot_);
+    if (map_in_game_)
+        g.panel(0, 0, 1920, 1080, rgba(0x02040C, 0.78f), 1, 0);
+
+    /* Left: the DualSense as the GBA, with the GBA button held. */
+    const float lx = 90, ly = 136, lw = 830, lh = 800;
+    g.panel(lx, ly, lw, lh, rgba(0x0A1236, 0.55f), 0.85f, kR, rgba(0x3D4F9E, 0.9f), 1.6f, 0, 0.10f);
+    g.text_mid(Font::Bold, ts(46), lx + 46, ly + 64, kWhite, Align::Left, tr(kMapKindNames[kMapKindGba]));
+    g.text_mid(Font::Regular, ts(26), lx + 46, ly + 112, kLavender, Align::Left,
+               fit(g, Font::Regular, ts(26),
+                   trf("Hold {control} and player 1's controller is the GBA", {{"control", control_name(gba.modifier)}}),
+                   lw - 92));
+    draw_gba_pad(gba, lx + 35, ly + 170, 760, 1.0f);
+    g.text_mid(Font::Regular, ts(22), lx + lw * 0.5f, ly + lh - 40, kLavender, Align::Center,
+               fit(g, Font::Regular, ts(22),
+                   tr("For every GameCube game with a GBA on a port (Settings > GameCube Ports)."), lw - 60));
+
+    /* Right: the GBA button, each GBA input and the DualSense control it's on, and the extras. */
+    const float px = 950, py = 136, pw = 880, ph = 800;
+    g.panel(px, py, pw, ph, rgba(0x0F1F63, 0.62f), 0.75f, kR, rgba(0x4C6FD8, 0.9f), 1.8f, 0, 0.12f);
+    const float row_x = px + 22, row_w = pw - 44;
+    const float row_h = std::min(44.0f, (ph - 160) / float(kGbaRows));
+    float y = py + 70;
+    for (int row = 0; row < kGbaRows; ++row)
+    {
+        if (row == kGbaRowModifier || row == kGbaRowFirstInput || row == kGbaRowStick)
+        {
+            g.panel(row_x + 20, y + 4, row_w - 40, 1.5f, rgba(0x3D4F9E, 0.8f), 1, 0);
+            y += 12;
+        }
+        const bool on = row == map_row_;
+        const float cy = y + row_h * 0.5f;
+        if (on)
+            g.panel(row_x, y + 2, row_w, row_h - 4, rgba(0x1D45B8, 0.88f), 0.7f, kR, kIcy, 2.2f, 8, 0.18f);
+        const float right = row_x + row_w - 22;
+        const Color ink = on ? kWhite : kSoft;
+        const bool capturing = on && map_capture_;
+        if (row == kGbaRowPlayer)
+        {
+            /* Whose buttons: each player has a whole GBA layout (Settings > GBA says who plays
+             * which GBA). */
+            g.text_mid(Font::SemiBold, ts(26), row_x + 30, cy, ink, Align::Left,
+                       fit(g, Font::SemiBold, ts(26), tr("Player"), row_w * 0.3f));
+            const float vx = row_x + row_w * 0.55f;
+            g.glyph(Glyph::Arrow, vx - 140, cy, 14, ink, -kPi * 0.5f);
+            g.glyph(Glyph::Arrow, vx + 140, cy, 14, ink, kPi * 0.5f);
+            g.text_mid(Font::Bold, ts(27), vx, cy, kWhite, Align::Center,
+                       trf("Player {n}", {{"n", std::to_string(map_gba_player_ + 1)}}));
+        }
+        else if (row == kGbaRowSlot)
+        {
+            /* Which buttons: Porpoise's, Mine 1, Mine 2 (and which are in use). */
+            g.text_mid(Font::SemiBold, ts(26), row_x + 30, cy, ink, Align::Left,
+                       fit(g, Font::SemiBold, ts(26), tr("Buttons"), row_w * 0.3f));
+            const float vx = row_x + row_w * 0.55f;
+            g.glyph(Glyph::Arrow, vx - 140, cy, 14, ink, -kPi * 0.5f);
+            g.glyph(Glyph::Arrow, vx + 140, cy, 14, ink, kPi * 0.5f);
+            g.text_mid(Font::Bold, ts(27), vx, cy, kWhite, Align::Center,
+                       fit(g, Font::Bold, ts(27), tr(gba_slot_name(map_gba_slot_)), 250));
+            const bool in_use = *L.use == map_gba_slot_;
+            std::string tag = map_gba_slot_ == 0 ? tr("Locked") : "";
+            if (in_use)
+                tag = tag.empty() ? tr("In Use") : tr("In Use") + " \xE2\x80\xA2 " + tag;
+            g.text_mid(Font::SemiBold, ts(21), right, cy, in_use ? rgba(0x7CF0A6) : kLavender, Align::Right,
+                       fit(g, Font::SemiBold, ts(21), tag, row_w * 0.22f));
+        }
+        else if (row == kGbaRowModifier || (row >= kGbaRowFirstInput && row < kGbaRowStick))
+        {
+            const int input = row == kGbaRowModifier ? -1 : gba_row_input(row - kGbaRowFirstInput);
+            gba_chip(input, row_x + 44, cy, 28, 1.0f);
+            g.text_mid(Font::SemiBold, ts(25), row_x + 96, cy, ink, Align::Left,
+                       tr(input < 0 ? "GBA Button (hold)" : gba_input_name(input)));
+            const int control = input < 0 ? gba.modifier : gba.control[input];
+            if (capturing)
+                g.text_mid(Font::Bold, ts(24), right, cy, kCyan, Align::Right, tr("Press a button\xE2\x80\xA6"));
+            else if (control < 0)
+                g.text_mid(Font::SemiBold, ts(23), right, cy, kLavender, Align::Right, tr("Not Set"));
+            else
+                draw_control(control, right, cy, on, std::min(50.0f, row_h + 6));
+        }
+        else if (row == kGbaRowStick || row == kGbaRowAlways || row == kGbaRowShowMode)
+        {
+            const bool stick = row == kGbaRowStick, always = row == kGbaRowAlways;
+            g.text_mid(Font::SemiBold, ts(25), row_x + 34, cy, ink, Align::Left,
+                       tr(stick ? "Left Stick as the GBA's D-Pad" : always ? "Always the GBA" : "Show GBA Screen"));
+            const std::string value =
+                stick    ? tr(*L.stick_dpad ? "On" : "Off")
+                : always ? tr(*L.always ? "On" : "Off")
+                         : tr(s.gba_show_mode == 2 ? "On" : s.gba_show_mode == 1 ? "Toggle" : "While Held");
+            g.text_mid(Font::Bold, ts(25), right, cy, kWhite, Align::Right, value);
+        }
+        else
+            g.text_mid(Font::SemiBold, ts(26), row_x + 34, cy, ink, Align::Left,
+                       tr("Start Over from Porpoise's Layout"));
+        y += row_h;
+    }
+    const double since = time_ - map_note_time_;
+    if (!map_note_.empty() && since < 4.0)
+    {
+        const float a = since < 3.0 ? 1.0f : float(4.0 - since);
+        g.text_mid(Font::SemiBold, ts(24), px + pw * 0.5f, py + ph - 32, with_alpha(kCyan, a), Align::Center,
+                   fit(g, Font::SemiBold, ts(24), map_note_, pw - 60));
+    }
+    draw_map_tabs();
+    if (map_capture_)
+    {
+        const int left = int(std::ceil(kCaptureSeconds - (time_ - map_capture_start_)));
+        const std::string what =
+            map_row_ == kGbaRowModifier ? tr("GBA Button (hold)") : tr(gba_input_name(gba_row_input(map_row_ - kGbaRowFirstInput)));
+        draw_prompts({}, {}, trf("Press the DualSense button for {button} ({n})",
+                                 {{"button", what}, {"n", std::to_string(std::max(1, left))}}));
+    }
+    else
+    {
+        const bool input_row = map_row_ >= kGbaRowFirstInput && map_row_ < kGbaRowStick;
+        std::vector<std::pair<Glyph, std::string>> left = {
+            {Glyph::DPad, "Browse"},
+            {Glyph::Cross, map_row_ == kGbaRowPlayer                                    ? "Browse"
+                           : map_row_ == kGbaRowSlot                                    ? "Use"
+                           : map_row_ == kGbaRowStartOver                             ? "Start Over"
+                           : map_row_ == kGbaRowStick || map_row_ == kGbaRowAlways ||
+                                     map_row_ == kGbaRowShowMode                        ? "Switch"
+                                                                                      : "Change"}};
+        if (input_row)
+            left.push_back({Glyph::Square, "Clear"});
+        left.push_back({Glyph::Circle, "Back"});
+        draw_prompts(left, {{kKeyL1R1, "Controller"}}, "");
+    }
 }
 } // namespace porpoise::ui
