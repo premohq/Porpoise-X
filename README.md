@@ -120,6 +120,30 @@ BIOS or firmware files.
   Customize buttons, then L1 / R1 to pick Remote + Nunchuk, Remote, Sideways
   or Classic.
 
+### Game Boy Advance on the link cable (beta)
+For GameCube games that link to a GBA: The Wind Waker's Tingle Tuner, Four
+Swords Adventures, Pac-Man Vs. and others. The GBA is Dolphin's own (mGBA).
+- **Settings → GameCube Ports:** set a port to **GBA (Integrated)**. It needs
+  the GBA BIOS as `/data/porpoise/saves/User/GBA/gba_bios.bin`.
+- **Settings → GBA:** who plays each GBA (player 1 to 4 holding their GBA
+  button, the port's own controller with no button held, or nobody), its game,
+  and its screen and sound.
+- **On the controller:** hold the GBA button (L3 unless you change it) and the
+  controller is the GBA. **Customize GBA Buttons** has a layout for each
+  player, and buttons to show, move and fade the GBA's screen, change its
+  volume, mute or reset it, pull its link cable, and quick save or load it.
+  **Always the GBA** is for a second controller that only plays a GBA.
+- **On the TV:** each GBA's screen over the game, in its own corner: 1x to 4x,
+  40% to 100% opaque, sharp or soft pixels, interframe blending.
+- **In a browser:** `http://<your PS5's address>:6771` shows a GBA's screen
+  and buttons (keyboard, gamepad or touch), and `/multi` shows several at once.
+  **GBA Web Page** turns it off.
+- **Sound:** each GBA's volume, mute, and its sound on its player's controller
+  speaker.
+- **In a game's menu:** reset the GBA, pull its link cable, change its game,
+  save and load its states (nine slots for each game), export and import its
+  save, and scan e-Reader cards.
+
 ### RetroAchievements (softcore)
 - **Your lists:** the in-game menu's **Achievements** tab shows every
   achievement for the game you're playing, unlocked or not, with its badge,
@@ -601,6 +625,10 @@ becomes the next player, up to four, and can join in the middle of a game.
 | `/data/porpoise/achievements/` | Each game's achievement list as of your last play, and the badges |
 | `/data/porpoise/location.txt` | Where Porpoise's folder is, after you moved it to another drive |
 | `/data/porpoise/cache/` | The menus' lettering, made once at the first start |
+| `/data/porpoise/games/gba/port1/` … `port4/` | Each GBA's games, and its saves when kept beside the game |
+| `/data/porpoise/games/gba/portN/exports/` | A GBA's states (`<game>.ss1` to `.ss9`) and exported saves |
+| `/data/porpoise/games/gba/ereader/` | e-Reader cards (`.raw`) |
+| `/data/porpoise/saves/User/GBA/` | The GBA BIOS (`gba_bios.bin`) and the GBAs' saves |
 
 ## Troubleshooting
 
