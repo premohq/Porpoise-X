@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #pragma once
 
+#include <algorithm>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -107,6 +109,109 @@ struct Settings
      * 2 low, 3 lowest: a curve, a full push still full), and a dead zone in
      * the middle (0 off, 1 small, 2 medium, 3 large). For twitchy steering. */
     int stick_sensitivity = 0, stick_deadzone = 0;
+    /* What each GameCube controller port holds, as Dolphin's own setting (the core's
+     * dolphin_si_device_port1..4): 0 a controller, 1 a Game Boy Advance on the link cable
+     * (GBA (Integrated): its screen and buttons are a web page on port 6771), 2 nothing.
+     * GameCube games only. */
+    int gc_port1_device = 0, gc_port2_device = 0, gc_port3_device = 0, gc_port4_device = 0;
+    /* The GBA on player 1's controller (porpoise::pad::GbaConfig): while gba_modifier (a
+     * porpoise::pad::Control) is held, the controls are the GBA's buttons, gba_buttons (a Control
+     * for each porpoise::pad::GbaInput), the left stick its D-pad too with gba_stick_dpad.
+     * Porpoise maps them itself (the core's own dolphin_gba_combos stay off). The GBA's screen on
+     * the TV: while its button is held (gba_show_mode 0), on and off with each press (1), or always
+     * (2); and
+     * while Move GBA Screen is held, when the left stick moves it. */
+    bool gba_buttons_on = true;
+    bool gba_web = true; /* the GBA's screen and buttons as a page in a browser */
+    int gba_modifier = porpoise::pad::CtlL3;
+    int gba_buttons[porpoise::pad::GbaCount] = {
+        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, porpoise::pad::CtlTouch, porpoise::pad::CtlOptions,
+        porpoise::pad::CtlRight, porpoise::pad::CtlLeft,   porpoise::pad::CtlUp,    porpoise::pad::CtlDown,
+        porpoise::pad::CtlR1,    porpoise::pad::CtlL1,     porpoise::pad::CtlTriangle, porpoise::pad::CtlCircle,
+        porpoise::pad::CtlL2,    -1,                       -1,                     porpoise::pad::CtlR2, -1, -1, -1};
+    /* A second set ("Mine 2"; gba_buttons above is "Mine 1"), and which is played:
+     * 0 Porpoise's own (porpoise::pad::gba_defaults), 1 Mine 1, 2 Mine 2. */
+    int gba_buttons2[porpoise::pad::GbaCount] = {
+        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, porpoise::pad::CtlTouch, porpoise::pad::CtlOptions,
+        porpoise::pad::CtlRight, porpoise::pad::CtlLeft,   porpoise::pad::CtlUp,    porpoise::pad::CtlDown,
+        porpoise::pad::CtlR1,    porpoise::pad::CtlL1,     porpoise::pad::CtlTriangle, porpoise::pad::CtlCircle,
+        porpoise::pad::CtlL2,    -1,                       -1,                     porpoise::pad::CtlR2, -1, -1, -1};
+    int gba_buttons_use = 1;
+    /* A slot's buttons (1, 2), or null for Porpoise's own (0). */
+    int *gba_slot(int slot) { return slot == 1 ? gba_buttons : slot == 2 ? gba_buttons2 : nullptr; }
+    bool gba_stick_dpad = false;
+    bool gba_always = false; /* player 1 is always the GBA they play (no GBA button to hold) */
+    int gba_show_mode = 0;
+    /* The GBA's screen on the TV: its top left in 1920x1080 (-1: bottom right), moved in a game
+     * with the GBA button and Move GBA Screen held and the left stick; how opaque, 0 = 100%,
+     * each step 10% less, 6 = 40%. */
+
+
+    /* Who plays each port's GBA: 0..3 player 1..4 (with their GBA button held), 4 the port's own
+     * controller (no GBA button: it is the GBA), 5 nobody (the page in a browser only). */
+    int gba_port1_control = 0, gba_port2_control = 0, gba_port3_control = 0, gba_port4_control = 0;
+    int gba_control(int port) const
+    {
+        const int c[4] = {gba_port1_control, gba_port2_control, gba_port3_control, gba_port4_control};
+        return port >= 0 && port < 4 ? std::clamp(c[port], 0, 5) : 5;
+    }
+    /* Players 2..4's GBA layouts, as player 1's above (gba_buttons, gba_buttons2, gba_buttons_use,
+     * gba_modifier, gba_stick_dpad); saved as gba_p2_buttons and so on. */
+    struct GbaLayout
+    {
+        int buttons[porpoise::pad::GbaCount];
+        int buttons2[porpoise::pad::GbaCount];
+        int use = 1;
+        int modifier = porpoise::pad::CtlL3;
+        bool stick_dpad = false;
+        bool always = false; /* always the GBA: as if the GBA button were held */
+    };
+    GbaLayout gba_more[3] = {gba_layout_defaults(), gba_layout_defaults(), gba_layout_defaults()};
+    static GbaLayout gba_layout_defaults()
+    {
+        GbaLayout l;
+        const porpoise::pad::GbaConfig d{};
+        for (int i = 0; i < porpoise::pad::GbaCount; ++i)
+            l.buttons[i] = l.buttons2[i] = d.control[i];
+        return l;
+    }
+    /* A player's (0..3) layout, as pointers into player 1's fields or gba_more. */
+    struct GbaLayoutRef
+    {
+        int *buttons, *buttons2, *use, *modifier;
+        bool *stick_dpad, *always;
+    };
+    GbaLayoutRef gba_layout(int player)
+    {
+        if (player <= 0 || player > 3)
+            return {gba_buttons, gba_buttons2, &gba_buttons_use, &gba_modifier, &gba_stick_dpad, &gba_always};
+        GbaLayout &l = gba_more[player - 1];
+        return {l.buttons, l.buttons2, &l.use, &l.modifier, &l.stick_dpad, &l.always};
+    }
+    /* A player's GBA config for porpoise::pad::set_gba (active left false: the caller decides). */
+    porpoise::pad::GbaConfig gba_player_config(int player) const;
+    /* Each GBA's (port 1..4's) own: its screen on the TV (top left in 1920x1080, -1 for its own
+     * corner; size 0..3 = 1x..4x the GBA's 240 x 160; opacity 0..6 = 40%..100%), and its sound
+     * (volume 0..10 = 0%..100%, the TV's and the controller's; muted). Saved together as
+     * gba_window1..4 = "x y size opacity volume muted". */
+    int gba_window_x[4] = {-1, -1, -1, -1}, gba_window_y[4] = {-1, -1, -1, -1};
+    int gba_window_size[4] = {2, 2, 2, 2}, gba_window_opacity[4] = {6, 6, 6, 6};
+    int gba_window_volume[4] = {10, 10, 10, 10};
+    bool gba_window_muted[4] = {false, false, false, false};
+    /* And, also in gba_windowN: its screen's filter (0 sharp pixels, 1 soft pixels), Interframe
+     * Blending (each picture half the one before, as Dolphin's), its sound on its player's
+     * controller speaker instead of the TV, and that speaker's resampling (0 Simple, 1 Smooth). */
+    int gba_window_filter[4] = {0, 0, 0, 0};
+    bool gba_window_blend[4] = {false, false, false, false};
+    bool gba_window_speaker[4] = {false, false, false, false};
+    int gba_window_smooth[4] = {0, 0, 0, 0};
+    /* Each GBA's game: a file in <data>/games/gba/portN ("" none: the BIOS alone), and whether its
+     * save is kept beside it (Dolphin's "Save in the Same Directory"). gba_romN = "0|1 name". */
+    std::string gba_rom[4];
+    bool gba_rom_beside[4] = {false, false, false, false};
+    /* The GameCube port with a GBA in it (0..3), -1 none: the lowest. */
+    int gba_port() const;
+    bool port_has_gba(int port) const;
     /* The player's own layouts, kept with the global settings (a game only
      * picks one): a porpoise::pad::Control for each GameCube input, in
      * porpoise::pad::GcInput order. Each starts as the GameCube layout. */

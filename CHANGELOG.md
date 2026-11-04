@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+**New**
+- **Game Boy Advance on the link cable (beta):** a GameCube port set to GBA
+  (Integrated) is Dolphin's own GBA (mGBA, built into the core), for The Wind
+  Waker's Tingle Tuner, Four Swords Adventures and the other link games. Needs
+  the GBA BIOS (`/data/porpoise/saves/User/GBA/gba_bios.bin`).
+- **Settings → GBA:** who plays each GBA (a player with their GBA button, the
+  port's own controller, or nobody), its game (`games/gba/portN`), and each
+  GBA's own screen and sound.
+- **The GBA on the controller:** hold the GBA button (L3) and the controller is
+  the GBA. A GBA tab in Customize Buttons, with a layout for each player.
+- **The GBA's screen on the TV**, one for each GBA: move it, 1x to 4x, 40% to
+  100% opaque, sharp or soft pixels, interframe blending.
+- **The GBA in a browser:** `http://<PS5>:6771`, and `/multi` for several at
+  once, with keyboard, gamepad and touch buttons.
+- **GBA sound:** volume, mute, and the sound on the player's controller
+  speaker.
+- **In the in-game menu:** reset a GBA, pull its link cable, change its game,
+  nine save state slots for each game, save export and import, e-Reader cards.
+
 ## 4.0 — 2026-10-21
 
 **New**

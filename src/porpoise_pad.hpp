@@ -97,6 +97,55 @@ Mapping preset(int layout);
 /* The bit in State::buttons for a control. */
 std::uint32_t control_bit(int control);
 
+/* ---- the integrated GBA (a GameCube port set to GBA), from a player's DualSense ------------ */
+
+/* The GBA's buttons, in mGBA's key-mask order (bit n = input n for the first
+ * ten), then Porpoise's own: show the GBA's screen on the TV. */
+enum GbaInput : int
+{
+    GbaA,
+    GbaB,
+    GbaSelect,
+    GbaStart,
+    GbaRight,
+    GbaLeft,
+    GbaUp,
+    GbaDown,
+    GbaR,
+    GbaL,
+    GbaShowScreen,
+    GbaMoveScreen,     /* held: the screen shows, and the left stick moves it */
+    GbaAdjustOpacity,  /* held: the screen shows, and the left stick (up / down) changes its opacity */
+    GbaReset,          /* pressed: the GBA starts over, the game goes on (as Dolphin's own) */
+    GbaMute,           /* pressed: the GBA's sound off, or on again */
+    GbaVolume,         /* held: the left stick (up / down) changes the GBA's volume */
+    GbaDisconnect,     /* pressed: the GBA's link cable out, or in again (as Dolphin's Disconnect) */
+    GbaQuickSave,      /* pressed: a GBA state in the first empty slot (1..9), else the oldest */
+    GbaQuickLoad,      /* pressed: the newest GBA state */
+    GbaCount,
+};
+constexpr int kGbaKeys = 10; /* the inputs that are GBA buttons */
+
+/* While the modifier is held, player 1's controls are the GBA's (and the game
+ * gets nothing from player 1); let go, they are the GameCube's again. */
+struct GbaConfig
+{
+    bool active = false;   /* a GameCube game with a GBA in a port, and GBA buttons on */
+    int modifier = CtlL3;  /* Control */
+    std::int8_t control[GbaCount] = {CtlCross, CtlSquare, CtlTouch, CtlOptions, CtlRight, CtlLeft,
+                                     CtlUp,    CtlDown,   CtlR1,    CtlL1,      CtlTriangle, CtlCircle,
+                                     CtlL2,    -1 /* Reset GBA: none until the player gives it one */,
+                                     -1 /* Mute */, CtlR2 /* Volume */, -1 /* Disconnect */,
+                                     -1 /* Quick Save */, -1 /* Quick Load */};
+    bool stick_dpad = false; /* the left stick is the GBA's D-pad too */
+    bool direct = false;     /* no GBA button: the player is the GBA (their port holds it) */
+};
+/* Porpoise's own GBA layout (GbaConfig's defaults). */
+GbaConfig gba_defaults();
+/* Each player's (0..3): a player whose GBA button is held (or direct) plays a GBA. */
+void set_gba(int player, const GbaConfig &config);
+GbaConfig gba(int player = 0);
+
 /* ---- the Wii Remote, from a DualSense --------------------------------------------------- */
 
 /* What a Wii game's port 0..3 is (the Dolphin core's libretro devices). */
@@ -273,6 +322,20 @@ struct State
     bool quick_load = false;    /* touch pad + L2 pressed: load the quick slot */
     bool screenshot = false;    /* touch pad + Square pressed: a screenshot (set_shot_buttons) */
     std::uint32_t buttons = 0;  /* Button bits */
+    /* The GBA (set_gba), this player's: */
+    bool gba_held = false;      /* the modifier is down: the controls are the GBA's */
+    std::uint16_t gba_keys = 0; /* mGBA's key mask (GbaA..GbaL = bits 0..9) */
+    bool gba_show = false;      /* the show-the-screen control is held (with the modifier) */
+    /* Move GBA Screen held (with the modifier): the screen shows and the left stick moves it
+     * (and isn't the GBA's D-pad then). */
+    bool gba_moving = false;
+    bool gba_opacity = false; /* Adjust Opacity held: the left stick changes it (gba_move_*) */
+    bool gba_reset = false;   /* Reset GBA held */
+    bool gba_mute = false;    /* Mute GBA held */
+    bool gba_volume = false;  /* GBA Volume held: the left stick changes it (gba_move_*) */
+    bool gba_disconnect = false; /* Disconnect GBA held */
+    bool gba_quick_save = false, gba_quick_load = false; /* Quick Save / Load GBA State held */
+    std::int16_t gba_move_x = 0, gba_move_y = 0;
 };
 
 bool open();

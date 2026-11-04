@@ -47,6 +47,7 @@
 #include "porpoise_atomic.hpp"
 #include "porpoise_forwarders.hpp"
 #include "porpoise_core.hpp"
+#include "gba_stream.hpp"
 #include "ecam_bridge.h"
 #include "porpoise_disc.hpp"
 #include "porpoise_forward.hpp"
@@ -329,6 +330,11 @@ void choose_data_dir()
     mkdir(g_data.c_str(), 0777);
     mkdir((g_data + "/covers").c_str(), 0777);
     mkdir((g_data + "/games").c_str(), 0777);
+    /* The GBAs' games (one folder per GameCube port) and e-Reader cards. */
+    mkdir((g_data + "/games/gba").c_str(), 0777);
+    for (const char *sub : {"/games/gba/port1", "/games/gba/port2", "/games/gba/port3", "/games/gba/port4",
+                            "/games/gba/ereader"})
+        mkdir((g_data + sub).c_str(), 0777);
     mkdir((g_data + "/saves").c_str(), 0777);
     mkdir((g_data + "/bios").c_str(), 0777); /* the player's own GameCube BIOS, if they have one */
     /* <data>/cheats (the player's own codes) is never made by Porpoise: the
@@ -368,6 +374,7 @@ bool g_menu_open = false;
 float g_curtain = 0.0f;
 std::string g_wii_game_id; /* the game playing, for the Wii MotionPlus's Auto */
 bool g_controller_speakers = false; /* this game's Remote sounds go to the controllers */
+bool g_gba_speaker = false;         /* this game's GBA sound goes to player 1's controller */
 porpoise::ui::App g_app;
 double g_time = 0;
 
@@ -1144,8 +1151,74 @@ void apply_frame_gen()
 /* The game's own controller extras: fast forward and quick save buttons,
  * turbo, and the trigger click where L2 / R2 are the GameCube's L and R. In
  * Porpoise's menus they are all off (apply_settings). */
+/* The GBA (a GameCube game with a GBA in a port): its port, and its buttons on player 1's
+ * controller while the GBA button is held. */
+/* The player in a GameCube port (0..3): player 1 is in Settings > Controls' port (p1_port), and
+ * the player who would be there takes port 1 (porpoise::core::set_player1_port). */
+int player_in_port(int port, bool wii_game)
+{
+    const int p1 = wii_game ? 0 : std::clamp(g_play.p1_port, 0, 3);
+    return port == p1 ? 0 : port == 0 ? p1 : port;
+}
+
+/* Who plays each GBA (-2 no GBA in that port, -1 nobody, 0..3 a player), and whether directly
+ * (the port's own controller, no GBA button). */
+void gba_players(bool wii_game, int who[4], bool direct[4])
+{
+    for (int port = 0; port < 4; ++port)
+    {
+        who[port] = -2;
+        direct[port] = false;
+        if (wii_game || !g_play.port_has_gba(port))
+            continue;
+        const int c = g_play.gba_control(port);
+        if (c <= 3)
+            who[port] = g_play.gba_buttons_on ? c : -1;
+        else if (c == 4)
+        {
+            who[port] = player_in_port(port, wii_game);
+            direct[port] = true;
+        }
+        else
+            who[port] = -1;
+    }
+}
+
+/* The GBAs (GameCube games with a GBA on a port): who plays each, each player's GBA buttons
+ * (their own layout, held with their GBA button or always), the page, the sound. */
+void apply_gba(bool wii_game)
+{
+    int who[4];
+    bool direct[4];
+    gba_players(wii_game, who, direct);
+    porpoise::core::set_gba_controls(who);
+    porpoise::core::set_gba_web(g_play.gba_web);
+    porpoise::gba_stream::set_verbose(g_settings.debug_logs);
+    for (int port = 0; port < 4; ++port)
+        porpoise::core::set_gba_volume(port, g_play.gba_window_volume[port] * 10, g_play.gba_window_muted[port]);
+    bool smooth = false;
+    for (int port = 0; port < 4; ++port)
+    {
+        porpoise::core::set_gba_speaker(port, g_play.gba_window_speaker[port]);
+        smooth = smooth || (g_play.gba_window_speaker[port] && g_play.gba_window_smooth[port] == 1);
+    }
+    porpoise::speaker::set_smooth(smooth);
+    for (int player = 0; player < porpoise::pad::kMaxPlayers; ++player)
+    {
+        porpoise::pad::GbaConfig c = g_play.gba_player_config(player);
+        for (int port = 0; port < 4; ++port)
+            if (who[port] == player)
+            {
+                c.active = true;
+                c.direct = c.direct || direct[port];
+            }
+        porpoise::pad::set_gba(player, c);
+    }
+}
+
 void apply_game_controls(bool wii_game)
 {
+    apply_gba(wii_game);
     porpoise::core::set_stick_invert(g_play.invert_main, g_play.invert_c);
     porpoise::core::set_player1_port(wii_game ? 0 : g_play.p1_port);
     porpoise::core::set_stick_shape(g_play.stick_sensitivity, g_play.stick_deadzone);
@@ -1193,6 +1266,8 @@ void apply_settings()
     porpoise::pad::set_rumble_enabled(g_settings.rumble);
     porpoise::pad::set_fast_forward_buttons(g_settings.ff_buttons);
     porpoise::pad::set_wii_buttons(g_settings.wii_buttons_in_use());
+    for (int player = 0; player < porpoise::pad::kMaxPlayers; ++player)
+        porpoise::pad::set_gba(player, porpoise::pad::GbaConfig{}); /* the menus: no GBA buttons */
     {
         const int lights[4] = {g_settings.light_1, g_settings.light_2, g_settings.light_3, g_settings.light_4};
         porpoise::pad::set_light_colours(lights);
@@ -1456,7 +1531,16 @@ int menu_paused(void *)
     else if (key == "invert_main" || key == "invert_c")
         porpoise::core::set_stick_invert(g_play.invert_main, g_play.invert_c);
     else if (key == "p1_port")
+    {
         porpoise::core::set_player1_port(g_play.p1_port);
+        apply_gba(porpoise::pad::wii().active); /* a GBA played by its port's own controller follows */
+    }
+    else if (key == "gba_reset")
+        porpoise::core::reset_gba();
+    else if (key.rfind("gba_", 0) == 0 || key.rfind("gc_port", 0) == 0)
+    {
+        apply_gba(porpoise::pad::wii().active);
+    }
     else if (key == "stick_sensitivity" || key == "stick_deadzone")
         porpoise::core::set_stick_shape(g_play.stick_sensitivity, g_play.stick_deadzone);
     else if (key == "fast_forward")
@@ -2230,6 +2314,280 @@ void draw_game_toast()
                    look::fit(g_gfx, Font::Regular, 20, g_toast.text, tw));
 }
 
+/* The GBA's screen on the TV, bottom right over the game: while its button is held with the GBA
+ * button, or on and off with each press (Settings::gba_show_mode). Its frames come from the core
+ * only while it is shown. */
+bool g_gba_moved = false; /* the GBA's screen was moved, or its opacity changed, in this game: saved after it */
+
+/* Each GBA's screen on the TV (a window per GameCube port with a GBA), driven by the controller
+ * of the player who plays it. */
+struct GbaWindow
+{
+    bool shown = false, was = false, moving = false, mute_was = false;
+    porpoise::ui::Texture *tex = nullptr;
+    unsigned seq = 0, tex_w = 0, tex_h = 0, base_w = 0, base_h = 0;
+    int tex_k = -1;         /* the scale the texture was made at */
+    bool tex_blend = false; /* and whether blended */
+    std::vector<std::uint16_t> px;
+    std::vector<std::uint8_t> rgba, prev; /* prev: the last picture, for Interframe Blending */
+    double note_until = 0;  /* the volume / mute readout stays this long after a change */
+    std::string note;       /* what the readout says instead (a quick save's slot), "" none */
+    bool quick_save_was = false, quick_load_was = false;
+    double step_next = 0;   /* Adjust Opacity / GBA Volume: the next step */
+    int quiet = 0;          /* frames shown with no picture from the GBA (trace.txt) */
+};
+GbaWindow g_gba_win[4];
+
+void draw_gba_window(int port, const porpoise::pad::State &pad)
+{
+    GbaWindow &W = g_gba_win[port];
+    if (!porpoise::core::has_gba() || porpoise::core::gba_player(port) < -1)
+    {
+        W.shown = W.was = W.mute_was = false;
+        W.seq = 0;
+        W.prev.clear();
+        return;
+    }
+    const bool held = pad.gba_show;
+    if (g_play.gba_show_mode == 2)
+        W.shown = true; /* On */
+    else if (g_play.gba_show_mode == 1)
+    {
+        if (held && !W.was)
+            W.shown = !W.shown;
+    }
+    else
+        W.shown = held;
+    W.was = held;
+    /* Move GBA Screen held: W.shown, and the left stick moves it. */
+    constexpr int kMoveDead = 6000;
+    W.moving = pad.gba_moving;
+    const bool pushed = std::abs(pad.gba_move_x) > kMoveDead || std::abs(pad.gba_move_y) > kMoveDead;
+    /* Adjust Opacity / GBA Volume held: the left stick up (more) or down (less), a step each quarter
+     * second while pushed. Both stay for every game (saved after it). */
+        auto adjust = [&](int &play, int &global, int max) {
+        if (std::abs(pad.gba_move_y) <= 16000)
+        {
+            W.step_next = 0;
+            return false;
+        }
+        if (g_time < W.step_next)
+            return false;
+        W.step_next = g_time + 0.25;
+        const int now = std::clamp(play + (pad.gba_move_y < 0 ? 1 : -1), 0, max);
+        if (now == play)
+            return false;
+        play = global = now;
+        g_gba_moved = true;
+        return true;
+    };
+    /* This GBA's own opacity, volume and mute. */
+    if (pad.gba_opacity)
+        adjust(g_play.gba_window_opacity[port], g_settings.gba_window_opacity[port], 6);
+    else if (pad.gba_volume)
+    {
+        if (adjust(g_play.gba_window_volume[port], g_settings.gba_window_volume[port], 10))
+        {
+            /* turning it up is meant to be heard */
+            g_play.gba_window_muted[port] = g_settings.gba_window_muted[port] = false;
+            porpoise::core::set_gba_volume(port, g_play.gba_window_volume[port] * 10, false);
+        }
+        W.note_until = g_time + 1.5;
+        W.note.clear();
+    }
+    else
+        W.step_next = 0;
+    /* Mute GBA: each press. */
+    if (pad.gba_mute && !W.mute_was)
+    {
+        g_play.gba_window_muted[port] = g_settings.gba_window_muted[port] = !g_play.gba_window_muted[port];
+        porpoise::core::set_gba_volume(port, g_play.gba_window_volume[port] * 10, g_play.gba_window_muted[port]);
+        g_gba_moved = true;
+        W.note_until = g_time + 1.5;
+        W.note.clear();
+    }
+    W.mute_was = pad.gba_mute;
+    /* Quick Save / Load GBA State: the game's slots (games/gba/portN/exports/<game>.ss1..9), the
+     * first empty (else the oldest) / the newest, as the in-game menu's slots. */
+    if ((pad.gba_quick_save && !W.quick_save_was) || (pad.gba_quick_load && !W.quick_load_was))
+    {
+        const std::string dir = g_data + "/games/gba/port" + std::to_string(port + 1) + "/exports";
+        std::string stem = g_play.gba_rom[port].empty() ? "bios" : g_play.gba_rom[port];
+        if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0)
+            stem.resize(dot);
+        int empty = 0, oldest = 0, newest = 0;
+        long long oldest_t = 0, newest_t = 0;
+        for (int slot = 1; slot <= 9; ++slot)
+        {
+            struct stat st;
+            if (stat((dir + "/" + stem + ".ss" + std::to_string(slot)).c_str(), &st) != 0)
+            {
+                if (!empty)
+                    empty = slot;
+                continue;
+            }
+            const long long t = static_cast<long long>(st.st_mtime);
+            if (!oldest || t < oldest_t)
+                oldest = slot, oldest_t = t;
+            if (!newest || t > newest_t)
+                newest = slot, newest_t = t;
+        }
+        const bool save = pad.gba_quick_save && !W.quick_save_was;
+        const int slot = save ? (empty ? empty : oldest) : newest;
+        if (slot)
+        {
+            mkdir(dir.c_str(), 0777);
+            porpoise::core::gba_request(port, save ? 5 : 4, dir + "/" + stem + ".ss" + std::to_string(slot));
+            W.note = porpoise::ui::trf(save ? "Saved to slot {n}" : "Loaded slot {n}", {{"n", std::to_string(slot)}});
+        }
+        else
+            W.note = porpoise::ui::tr("No GBA states yet");
+        W.note_until = g_time + 1.5;
+    }
+    W.quick_save_was = pad.gba_quick_save;
+    W.quick_load_was = pad.gba_quick_load;
+    const bool noting = g_time < W.note_until;
+    const bool visible = W.shown || W.moving || pad.gba_opacity || noting;
+    if (!visible)
+        return;
+    unsigned w = 0, h = 0;
+    const bool fresh = porpoise::core::gba_frame(port, W.px, w, h, W.seq) && w > 0 && h > 0;
+    if (!fresh && ++W.quiet == 180)
+    {
+        /* (Settings > Debug Logs: a TV screen that gets no pictures, for a report.) */
+        if (g_settings.debug_logs)
+        {
+            char line[120];
+            std::snprintf(line, sizeof line, "gba screen: GBA %d shown 3 s with no new picture (seq %u)", port + 1, W.seq);
+            ps5::debug::mark(line);
+        }
+    }
+    if (fresh)
+    {
+        W.base_w = w;
+        W.base_h = h;
+    }
+    /* Size 1x..4x. Sharp pixels (Filter Off): each pixel made a k x k block, k the size, so the
+     * renderer's smoothing only softens the blocks' edges; Soft Pixels: as it is, smoothed. */
+    const int size = std::clamp(g_play.gba_window_size[port], 0, 3) + 1;
+    const int k = std::clamp(g_play.gba_window_filter[port], 0, 1) == 0 ? size : 1;
+    const bool blend = g_play.gba_window_blend[port];
+    const bool redo = (fresh || k != W.tex_k || blend != W.tex_blend) && W.base_w > 0 && !W.px.empty();
+    if (redo)
+    {
+        if (fresh && (W.quiet >= 180 || W.seq == 1))
+            if (g_settings.debug_logs)
+            {
+                char line[120];
+                std::snprintf(line, sizeof line, "gba screen: GBA %d picture %u (%ux%u)", port + 1, W.seq, W.base_w, W.base_h);
+                ps5::debug::mark(line);
+            }
+        if (fresh)
+            W.quiet = 0;
+        const unsigned kk = unsigned(k);
+        if (!W.tex || W.base_w * kk != W.tex_w || W.base_h * kk != W.tex_h)
+        {
+            if (W.tex)
+                g_gfx.free_texture(W.tex);
+            W.tex = g_gfx.stream_texture(int(W.base_w * kk), int(W.base_h * kk));
+            W.tex_w = W.base_w * kk;
+            W.tex_h = W.base_h * kk;
+        }
+        W.tex_k = k;
+        W.tex_blend = blend;
+        /* 15-bit (red bits 0-4, green 5-9, blue 10-14) to RGB, each channel's five bits widened as
+         * mGBA does; with Interframe Blending, half this picture and half the last (Dolphin's). */
+        const std::size_t n = std::size_t(W.base_w) * W.base_h;
+        std::vector<std::uint8_t> cur(n * 3);
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const std::uint16_t v = W.px[i];
+            const unsigned r = v & 31, g = (v >> 5) & 31, b = (v >> 10) & 31;
+            cur[i * 3 + 0] = std::uint8_t((r << 3) | (r >> 2));
+            cur[i * 3 + 1] = std::uint8_t((g << 3) | (g >> 2));
+            cur[i * 3 + 2] = std::uint8_t((b << 3) | (b >> 2));
+        }
+        std::vector<std::uint8_t> shown_px = cur;
+        if (blend && W.prev.size() == cur.size())
+            for (std::size_t i = 0; i < cur.size(); ++i)
+                shown_px[i] = std::uint8_t((unsigned(cur[i]) + W.prev[i] + 1) / 2);
+        if (fresh)
+            W.prev.swap(cur);
+        W.rgba.resize(std::size_t(W.tex_w) * W.tex_h * 4);
+        for (unsigned y0 = 0; y0 < W.base_h; ++y0)
+        {
+            std::uint8_t *row = &W.rgba[std::size_t(y0 * kk) * W.tex_w * 4];
+            for (unsigned x0 = 0; x0 < W.base_w; ++x0)
+            {
+                const std::uint8_t *c3 = &shown_px[(std::size_t(y0) * W.base_w + x0) * 3];
+                const std::uint8_t c[4] = {c3[0], c3[1], c3[2], 255};
+                for (unsigned d = 0; d < kk; ++d)
+                    std::memcpy(row + (std::size_t(x0) * kk + d) * 4, c, 4);
+            }
+            for (unsigned d = 1; d < kk; ++d)
+                std::memcpy(row + std::size_t(d) * W.tex_w * 4, row, std::size_t(W.tex_w) * 4);
+        }
+        if (W.tex)
+            g_gfx.stream_update(W.tex, W.rgba.data());
+    }
+    /* The GBA's size times 1..4, a margin from the corner. */
+    const float sw = 240.0f * float(size), sh = W.base_w ? sw * float(W.base_h) / float(W.base_w) : 160.0f * float(size);
+    /* Its own corner until moved: port 1 bottom right, 2 bottom left, 3 top right, 4 top left. */
+    float x = g_play.gba_window_x[port] >= 0 ? float(g_play.gba_window_x[port]) : (port % 2 == 0 ? 1920 - 48 - sw : 48);
+    float y = g_play.gba_window_y[port] >= 0 ? float(g_play.gba_window_y[port]) : (port < 2 ? 1080 - 48 - sh : 48);
+    if (pushed && W.moving)
+    {
+        /* Up to about 900 pixels a second at a full push. */
+        auto speed = [](std::int16_t v) { return std::abs(v) > kMoveDead ? float(v) / 32767.0f * 15.0f : 0.0f; };
+        x += speed(pad.gba_move_x);
+        y += speed(pad.gba_move_y);
+        g_gba_moved = true;
+    }
+    x = std::clamp(x, 8.0f, std::max(8.0f, 1920 - 8 - sw));
+    y = std::clamp(y, 8.0f, std::max(8.0f, 1080 - 8 - sh));
+    if (g_gba_moved && (W.moving || g_play.gba_window_x[port] >= 0))
+    {
+        g_play.gba_window_x[port] = g_settings.gba_window_x[port] = int(x);
+        g_play.gba_window_y[port] = g_settings.gba_window_y[port] = int(y);
+    }
+    const float alpha = 0.4f + 0.1f * float(std::clamp(g_play.gba_window_opacity[port], 0, 6));
+    g_gfx.panel(x - 8, y - 8, sw + 16, sh + 16, porpoise::ui::rgba(0x0A1236, 0.85f * alpha), 0.9f, 14,
+                porpoise::ui::rgba(W.moving ? 0xFFC85C : 0x5CD3FF, 0.9f * alpha), W.moving ? 3.0f : 1.6f);
+    if (W.tex && W.seq > 0)
+        g_gfx.image(W.tex, x, y, sw, sh, porpoise::ui::rgba(0xFFFFFF, alpha));
+    if (pad.gba_opacity || noting)
+    {
+        /* What it is now, above the screen (below it when it's at the top). */
+        char text[48];
+        if (!W.note.empty() && !pad.gba_opacity && !pad.gba_volume)
+            std::snprintf(text, sizeof text, "%s", W.note.c_str());
+        else if (pad.gba_opacity)
+            std::snprintf(text, sizeof text, "%d%%", 40 + 10 * std::clamp(g_play.gba_window_opacity[port], 0, 6));
+        else if (g_play.gba_window_muted[port])
+            std::snprintf(text, sizeof text, "%s", porpoise::ui::tr("Muted").c_str());
+        else
+            std::snprintf(text, sizeof text, "%s %d%%", porpoise::ui::tr("Volume").c_str(),
+                          10 * std::clamp(g_play.gba_window_volume[port], 0, 10));
+        const float tw = std::max(140.0f, g_gfx.measure(porpoise::ui::Font::Bold, 28, text) + 40);
+        const float ly = y > 80 ? y - 64 : y + sh + 18;
+        g_gfx.panel(x + sw * 0.5f - tw * 0.5f, ly, tw, 46, porpoise::ui::rgba(0x0A1236, 0.85f), 0.9f, 14,
+                    porpoise::ui::rgba(0xFFC85C, 0.9f), 1.6f);
+        g_gfx.text_mid(porpoise::ui::Font::Bold, 28, x + sw * 0.5f, ly + 23, porpoise::ui::rgba(0xFFE7B0),
+                       porpoise::ui::Align::Center, text);
+    }
+}
+
+void draw_gba_screen()
+{
+    for (int port = 0; port < 4; ++port)
+    {
+        /* The pad of who plays it; nobody's (the page only) shows only with Show GBA Screen: On. */
+        const int who = porpoise::core::gba_player(port);
+        static const porpoise::pad::State kNobody{};
+        draw_gba_window(port, who >= 0 ? porpoise::pad::state(who) : kNobody);
+    }
+}
+
 void launch_frame(bool core_frame, double fps, void *)
 {
     if (core_frame && !g_boot_marker.empty())
@@ -2273,6 +2631,8 @@ void launch_frame(bool core_frame, double fps, void *)
         poll_shots(&pad);
     }
     draw_border();
+    if (!g_menu_open)
+        draw_gba_screen();
     if ((g_app.menu_fast_forward() > 1 || porpoise::core::fast_forward() > 1) && !g_menu_open)
     {
         /* Fast forward is on: say so, top right. */
@@ -3081,6 +3441,25 @@ int main(int argc, char **argv)
         bool controller_speakers = false;
         if (wii_game && g_play.wiimote_speaker == 2)
             controller_speakers = porpoise::speaker::open_ports() > 0;
+        /* Each GBA's sound on its player's controller (a GameCube game with GBAs on ports). */
+        int gba_who[4];
+        bool gba_direct[4];
+        gba_players(wii_game, gba_who, gba_direct);
+        const bool gba_played = gba_who[0] >= 0 || gba_who[1] >= 0 || gba_who[2] >= 0 || gba_who[3] >= 0;
+        bool gba_any_speaker = false;
+        for (int port = 0; port < 4; ++port)
+            gba_any_speaker = gba_any_speaker || (gba_who[port] >= 0 && g_play.gba_window_speaker[port]);
+        const bool gba_speaker = gba_any_speaker && gba_played && porpoise::speaker::open_ports() > 0;
+        /* Each GBA's game (games/gba/portN), put in as the game starts. */
+        for (int port = 0; port < 4; ++port)
+        {
+            const std::string &rom = g_play.gba_rom[port];
+            const std::string path = rom.empty() ? "" : g_data + "/games/gba/port" + std::to_string(port + 1) + "/" + rom;
+            struct stat rom_st;
+            porpoise::core::set_gba_rom(port, gba_who[port] >= -1 && !path.empty() && stat(path.c_str(), &rom_st) == 0 ? path : "",
+                                        g_play.gba_rom_beside[port]);
+        }
+        g_gba_speaker = gba_speaker;
         set_ini_value(dolphin_ini, "Core", "WiimoteEnableSpeaker", g_play.wiimote_speaker > 0 ? "True" : "False");
         /* Online (beta): WiiConnect24 through WiiLink. */
         set_ini_value(dolphin_ini, "Core", "EnableWiiLink", g_play.wii_online ? "True" : "False");
@@ -3321,6 +3700,7 @@ int main(int argc, char **argv)
 #endif
         playback.wii = g_play.wii_config(is_wii, g_wii_game_id);
         playback.controller_speakers = g_controller_speakers;
+        playback.gba_speaker = g_gba_speaker;
         playback.audio_pull = g_play.audio_pull;
         playback.audio_buffer_ms = g_play.audio_buffer_ms();
         playback.audio_fill = g_play.audio_fill;
@@ -3390,7 +3770,11 @@ int main(int argc, char **argv)
 #ifdef PORPOISE_DESKTOP
         porpoise::platform::set_in_game(true);
 #endif
+        g_gba_moved = false;
         const porpoise::core::Exit exit = porpoise::core::run_game(launch->path.c_str(), core_paths, hooks, playback);
+        porpoise::core::set_gba_controls(nullptr); /* no GBA now: the page stops */
+        if (g_gba_moved)
+            g_settings.save(g_settings_path); /* where the GBA's screen was moved to */
         if (!g_boot_marker.empty())
         {
             /* Left (or failed) before the first picture: not a stall, so the

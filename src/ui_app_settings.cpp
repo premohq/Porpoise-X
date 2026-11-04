@@ -730,6 +730,25 @@ void App::add_game_rows(Settings &t, bool per_game)
                "How far the control stick moves before the game sees it: for a stick that drifts on its own.",
                &t.stick_deadzone, 0, {"Off", "Small", "Medium", "Large"});
     }
+
+    header("GameCube Ports");
+    {
+        /* Dolphin's own Controllers setting (the core's dolphin_si_device_port1..4, gba-link.patch). */
+        static const char *const kPortKeys[] = {"gc_port1_device", "gc_port2_device", "gc_port3_device",
+                                                "gc_port4_device"};
+        static const char *const kPortLabels[] = {"Port 1 (beta)", "Port 2 (beta)", "Port 3 (beta)",
+                                                  "Port 4 (beta)"};
+        int *const ports[] = {&t.gc_port1_device, &t.gc_port2_device, &t.gc_port3_device, &t.gc_port4_device};
+        for (int i = 0; i < 4; ++i)
+            choice(kPortKeys[i], kPortLabels[i],
+                   "What this GameCube controller port holds. GBA (Integrated) is a Game Boy Advance on the link "
+                   "cable, for Wind Waker's Tingle Tuner and Four Swords Adventures: open http://<your PS5's "
+                   "address>:6771 in a browser on the same network for its screen and buttons. It needs the GBA "
+                   "BIOS as /data/porpoise/saves/User/GBA/gba_bios.bin. Best set for one game (its own "
+                   "settings). GameCube games only.",
+                   ports[i], 0, {"Controller", "GBA (Integrated)", "None"});
+
+    }
     {
         SettingRow r;
         r.section = section;
@@ -773,6 +792,170 @@ void App::add_game_rows(Settings &t, bool per_game)
         rows_.push_back(r);
     }
 
+    {
+        header("GBA");
+        {
+            SettingRow r; /* first: the buttons, then who plays which GBA and the rest */
+            r.section = section;
+            r.label = tr("Customize GBA Buttons");
+            r.help = tr("The GBA's buttons on the controller (with the GBA button held): Porpoise's set and two of your "
+                        "own, the GBA button, the left stick, Show, Move and Opacity, and Reset GBA.");
+            r.values = {tr("Edit\xE2\x80\xA6")};
+            r.action = kRowMappingGba;
+            rows_.push_back(r);
+        }
+        /* The GBA on a GameCube port (GameCube Ports above). */
+        {
+            /* Who plays each port's GBA (one set to GBA (Integrated) under GameCube Ports). */
+            static const char *const kKeys[] = {"gba_port1_control", "gba_port2_control", "gba_port3_control",
+                                                "gba_port4_control"};
+            static const char *const kLabels[] = {"GBA on Port 1 (beta)", "GBA on Port 2 (beta)",
+                                                  "GBA on Port 3 (beta)", "GBA on Port 4 (beta)"};
+            int *const controls[] = {&t.gba_port1_control, &t.gba_port2_control, &t.gba_port3_control,
+                                     &t.gba_port4_control};
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!t.port_has_gba(i))
+                    continue;
+                /* Its game, put in as the game starts (before the GBA's BIOS): the files in its folder. */
+                static const char *const kRomKeys[] = {"gba_rom1", "gba_rom2", "gba_rom3", "gba_rom4"};
+                static const char *const kRomLabels[] = {"GBA on Port 1: Game (beta)", "GBA on Port 2: Game (beta)",
+                                                         "GBA on Port 3: Game (beta)", "GBA on Port 4: Game (beta)"};
+                static const char *const kBesideLabels[] = {
+                    "GBA on Port 1: Save Beside the Game (beta)", "GBA on Port 2: Save Beside the Game (beta)",
+                    "GBA on Port 3: Save Beside the Game (beta)", "GBA on Port 4: Save Beside the Game (beta)"};
+                const std::string dir = data_dir_ + "/games/gba/port" + std::to_string(i + 1);
+                SettingRow r;
+                r.section = section;
+                r.key = kRomKeys[i];
+                r.label = beta_label(kRomLabels[i], r.beta, &r.alpha);
+                r.help = tr("The game in this GBA as the game starts, so it boots straight into it: a file you put in "
+                            "the folder below. None: the GBA's BIOS alone. In a game: the menu's GBA Game.") +
+                         "\n" + dir;
+                r.values.push_back(tr("None (BIOS)"));
+                r.text_choices.push_back("");
+                gba_rom_choice_[i] = 0;
+                if (DIR *d = opendir(dir.c_str()))
+                {
+                    std::vector<std::string> names;
+                    while (const dirent *e = readdir(d))
+                    {
+                        std::string n = e->d_name, low = n;
+                        for (char &c : low)
+                            c = char(std::tolower(static_cast<unsigned char>(c)));
+                        for (const char *end : {".gba", ".agb", ".bin"})
+                            if (low.size() > 4 && low.compare(low.size() - 4, 4, end) == 0)
+                                names.push_back(n);
+                    }
+                    closedir(d);
+                    std::sort(names.begin(), names.end());
+                    for (const std::string &n : names)
+                    {
+                        if (n == t.gba_rom[i])
+                            gba_rom_choice_[i] = int(r.values.size());
+                        r.values.push_back(n);
+                        r.text_choices.push_back(n);
+                    }
+                }
+                if (!t.gba_rom[i].empty() && gba_rom_choice_[i] == 0)
+                {
+                    /* Kept, but not in the folder now. */
+                    gba_rom_choice_[i] = int(r.values.size());
+                    r.values.push_back(t.gba_rom[i] + " (" + tr("missing") + ")");
+                    r.text_choices.push_back(t.gba_rom[i]);
+                }
+                r.int_value = &gba_rom_choice_[i];
+                r.text_value = &t.gba_rom[i];
+                rows_.push_back(r);
+                toggle(kRomKeys[i], kBesideLabels[i],
+                       "This GBA's save kept beside its game in its folder (Dolphin's Save in the Same Directory), "
+                       "instead of with Porpoise's saves.",
+                       &t.gba_rom_beside[i]);
+                    choice(kKeys[i], kLabels[i],
+                           "Who plays this GBA. A player plays it while holding their GBA button (each player has "
+                           "their own GBA buttons: Customize GBA Buttons), its sound on their controller and its "
+                           "screen theirs to show. Its Own Controller: the controller in this port is the GBA, no "
+                           "button held (Four Swords Adventures). Nobody: only the page in a browser.",
+                           controls[i], 0,
+                           {"Player 1", "Player 2", "Player 3", "Player 4", "Its Own Controller", "Nobody"});
+            }
+        }
+        toggle("gba_web", "GBA Web Page (beta)",
+               "The GBA's screen and buttons as a page in a browser on the same network: http://<your PS5's "
+               "address>:6771. Off, the GBA plays only on the TV and the controller.",
+               &t.gba_web);
+        toggle("gba_buttons_on", "GBA Buttons on the Controller (beta)",
+               "With a GBA on a port, hold the GBA button (L3 unless you change it) and player 1's controller "
+               "plays the GBA; let go and it's the GameCube's again. Nothing reaches the GameCube game while "
+               "it's held. Set the buttons in Controls > Customize Buttons, on the GBA tab (L1 / R1).",
+               &t.gba_buttons_on);
+        choice("gba_show_mode", "Show GBA Screen (beta)",
+               "The GBA's screen on the TV, over the game: while Show GBA Screen is held (with the GBA button), "
+               "on and off with each press, or always on.",
+               &t.gba_show_mode, 0, {"While Held", "Toggle", "On"});
+        {
+            /* Each GBA's own screen size and opacity (and sound, below), saved as gba_windowN. */
+            static const char *const kKeys[] = {"gba_window1", "gba_window2", "gba_window3", "gba_window4"};
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!t.port_has_gba(i))
+                    continue;
+                static const char *const kSize[] = {"GBA 1 Screen Size (beta)", "GBA 2 Screen Size (beta)",
+                                                    "GBA 3 Screen Size (beta)", "GBA 4 Screen Size (beta)"};
+                static const char *const kOpacity[] = {"GBA 1 Opacity (beta)", "GBA 2 Opacity (beta)",
+                                                       "GBA 3 Opacity (beta)", "GBA 4 Opacity (beta)"};
+                choice(kKeys[i], kSize[i], "How big this GBA's screen is on the TV: one to four times its own 240 x 160.",
+                       &t.gba_window_size[i], 0, {"1x", "2x", "3x", "4x"});
+                choice(kKeys[i], kOpacity[i],
+                       "How much of the game shows through this GBA's screen on the TV. In a game, its player holds "
+                       "the GBA button and Adjust GBA Opacity (L2 unless changed) and pushes the left stick up or "
+                       "down; Move GBA Screen (Circle) and the left stick moves it.",
+                       &t.gba_window_opacity[i], 0, {"40%", "50%", "60%", "70%", "80%", "90%", "100%"});
+                static const char *const kFilter[] = {"GBA 1 Screen Filter (beta)", "GBA 2 Screen Filter (beta)",
+                                                      "GBA 3 Screen Filter (beta)", "GBA 4 Screen Filter (beta)"};
+                static const char *const kBlend[] = {"GBA 1 Interframe Blending (beta)", "GBA 2 Interframe Blending (beta)",
+                                                     "GBA 3 Interframe Blending (beta)", "GBA 4 Interframe Blending (beta)"};
+                choice(kKeys[i], kFilter[i],
+                       "How this GBA's screen on the TV is drawn: its pixels sharp, or softened. The page in a browser "
+                       "has its own (its settings).",
+                       &t.gba_window_filter[i], 0, {"Off", "Soft Pixels"});
+                toggle(kKeys[i], kBlend[i],
+                       "Each of this GBA's pictures shown half over the one before, as on the GBA's own screen: for "
+                       "games that flicker sprites to make them see-through. The TV's only.",
+                       &t.gba_window_blend[i]);
+            }
+        }
+        {
+            static const char *const kKeys[] = {"gba_window1", "gba_window2", "gba_window3", "gba_window4"};
+            static const char *const kVolume[] = {"GBA 1 Volume (beta)", "GBA 2 Volume (beta)", "GBA 3 Volume (beta)",
+                                                  "GBA 4 Volume (beta)"};
+            static const char *const kMute[] = {"Mute GBA 1 (beta)", "Mute GBA 2 (beta)", "Mute GBA 3 (beta)",
+                                                "Mute GBA 4 (beta)"};
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!t.port_has_gba(i))
+                    continue;
+                choice(kKeys[i], kVolume[i],
+                       "This GBA's sound, on the TV or its player's controller. In a game, its player holds the GBA "
+                       "button and GBA Volume (R2 unless changed) and pushes the left stick up or down; Mute GBA (a "
+                       "button of their choosing) turns it off and on.",
+                       &t.gba_window_volume[i], 0, {"0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"});
+                toggle(kKeys[i], kMute[i], "This GBA's sound off.", &t.gba_window_muted[i]);
+                static const char *const kSpeaker[] = {"GBA 1 Sound on the Controller (beta)", "GBA 2 Sound on the Controller (beta)",
+                                                       "GBA 3 Sound on the Controller (beta)", "GBA 4 Sound on the Controller (beta)"};
+                static const char *const kSmooth[] = {"GBA 1 Speaker Resampling (beta)", "GBA 2 Speaker Resampling (beta)",
+                                                      "GBA 3 Speaker Resampling (beta)", "GBA 4 Speaker Resampling (beta)"};
+                toggle(kKeys[i], kSpeaker[i],
+                       "This GBA's sound from its player's controller speaker instead of the TV, as Dolphin can do "
+                       "for the Wii Remote's speaker. The speakers open as the game starts.",
+                       &t.gba_window_speaker[i]);
+                choice(kKeys[i], kSmooth[i],
+                       "How this GBA's sound is made the controller speaker's rate: Simple (the nearest sample) or "
+                       "Smooth (between two samples, a little softer).",
+                       &t.gba_window_smooth[i], 0, {"Simple", "Smooth"});
+            }
+        }
+    }
     header("Wii Remote");
     {
         SettingRow r;
@@ -2053,7 +2236,9 @@ void App::change_setting(int dir)
         }
         else
             *r.int_value = std::clamp(*r.int_value + dir, r.min, r.min + n - 1);
-        if (r.text_value && r.int_value == &border_choice_)
+        if (r.text_value && !r.text_choices.empty())
+            *r.text_value = r.text_choices[std::size_t(std::clamp(*r.int_value, 0, int(r.text_choices.size()) - 1))];
+        else if (r.text_value && r.int_value == &border_choice_)
             *r.text_value = border_names_[std::size_t(std::clamp(border_choice_, 0, int(border_names_.size()) - 1))];
     }
     if (r.key == "enh_advanced")
@@ -2441,6 +2626,11 @@ App::Action App::activate_row(const SettingRow &row)
         return Action::None;
     case kRowMapping:
         open_mapping();
+        return Action::None;
+    case kRowMappingGba:
+        open_mapping();
+        map_kind_ = 5; /* the GBA's tab */
+        map_row_ = 0;
         return Action::None;
     case kRowShots:
         open_shots("", Screen::Main);
@@ -3269,7 +3459,7 @@ void App::draw_settings()
         draw_prompts({{Glyph::Cross, "Change"}, {Glyph::Circle, "Sections"}}, {}, "");
     else if (focus.action == kRowRescan)
         draw_prompts({{Glyph::Cross, "Search"}, {Glyph::Circle, "Sections"}}, {}, "");
-    else if (focus.action == kRowMapping)
+    else if (focus.action == kRowMapping || focus.action == kRowMappingGba)
         draw_prompts({{Glyph::Cross, "Customize"}, {Glyph::Circle, "Sections"}}, {}, "");
     else if (focus.action == kRowShots)
         draw_prompts({{Glyph::Cross, "Open"}, {Glyph::Circle, "Sections"}}, {}, "");

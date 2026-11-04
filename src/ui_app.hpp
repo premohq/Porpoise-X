@@ -521,6 +521,7 @@ private:
         int *int_value = nullptr;
         bool *bool_value = nullptr;
         std::string *text_value = nullptr; /* a text setting chosen from a list (the border) */
+        std::vector<std::string> text_choices; /* text_value's for each of values (else the border's) */
         std::vector<int> order;            /* when set: values[i] is the setting's order[i] */
         int toggle = -1;                   /* a switch: 1 on, 0 off; -1 not a switch */
         int rec = -1;                      /* its recommendation (rec_rows_) */
@@ -1001,6 +1002,11 @@ private:
     /* The same screen for a Wii controller's buttons (map_kind_ 1..4). */
     Action update_wii_mapping(bool up, bool down, bool left, bool right);
     void draw_wii_mapping(double time);
+    /* The same screen for the GBA's buttons (map_kind_ 5): one set, every GameCube game. */
+    Action update_gba_mapping(bool up, bool down, bool left, bool right);
+    void draw_gba_mapping(double time);
+    void draw_gba_pad(const porpoise::pad::GbaConfig &gba, float bx, float by, float art_h, float alpha);
+    void gba_chip(int input, float cx, float cy, float ch, float alpha);
     void draw_map_tabs();
     bool switch_map_kind(); /* L1 / R1: GameCube, then each Wii controller */
     void assign_control(int gc_input, int control);
@@ -1435,6 +1441,7 @@ private:
     bool qr_tried_ = false;
     std::vector<std::string> border_names_; /* the Border row's choices */
     int border_choice_ = 0;
+    int gba_rom_choice_[4] = {}; /* Settings > GBA's game rows: the file picked in each port's folder */
     /* A game's home screen tile (Game settings > Home screen): its icon (0 the
      * cover, 1 the player's own), background (0 Porpoise's, 1 the cover, 2 the
      * player's own), and whether Porpoise closes after the game. */
@@ -1480,6 +1487,8 @@ private:
     double map_note_time_ = -10;
     int map_kind_ = 0;
     int map_wii_slot_ = 1; /* the Wii buttons being edited: 0 Porpoise's, 1 Mine 1, 2 Mine 2 */
+    int map_gba_slot_ = 1;   /* the GBA's buttons being edited: the same three */
+    int map_gba_player_ = 0; /* whose GBA buttons (0..3: player 1..4) */
     /* Settings > Games > Move Porpoise's folder: the places offered (label,
      * path), the one picked, and the one confirmed. */
     std::vector<std::pair<std::string, std::string>> move_places_;

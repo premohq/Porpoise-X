@@ -19,12 +19,15 @@
  * Changes are saved as the game's own settings and take effect at once
  * (main applies them as take_menu_change() reports them). */
 #include <algorithm>
+#include <cctype>
+#include <dirent.h>
 #include <cstring>
 #include <cmath>
 #include <ctime>
 #include <sys/stat.h>
 
 #include "porpoise_borders.hpp"
+#include "porpoise_core.hpp"
 #include "porpoise_pad.hpp"
 #include "porpoise_states.hpp"
 #include "ui_app.hpp"
@@ -67,6 +70,60 @@ int g_menu_discs = 0, g_menu_disc = 0; /* App::set_menu_discs */
 std::vector<int> g_menu_disc_numbers;                         /* the game's own discs' numbers */
 std::vector<std::pair<std::string, int>> g_menu_other_discs; /* 4.0: other games' discs */
 int g_menu_disc_pick = 0, g_menu_disc_chosen = -1;
+/* The GBAs (GameCube ports with one): which the GBA rows are for, its folder's games (and which
+ * is picked), the e-Reader cards. Lists read as the rows are made. */
+std::string g_menu_gba_dir; /* <data>/games/gba */
+int g_menu_gba = -1, g_menu_gba_rom_pick = 0, g_menu_gba_card_pick = 0;
+std::vector<std::string> g_menu_gba_roms, g_menu_gba_cards;
+int g_menu_gba_slot = 1, g_menu_gba_import_pick = 0;
+std::vector<std::string> g_menu_gba_imports; /* the game's .sav files in exports, newest first */
+
+std::vector<std::string> files_in(const std::string &dir, std::initializer_list<const char *> endings)
+{
+    std::vector<std::string> out;
+    if (DIR *d = opendir(dir.c_str()))
+    {
+        while (const dirent *e = readdir(d))
+        {
+            std::string n = e->d_name, low = n;
+            for (char &c : low)
+                c = char(std::tolower(static_cast<unsigned char>(c)));
+            for (const char *end : endings)
+            {
+                const std::string x = end;
+                if (low.size() > x.size() && low.compare(low.size() - x.size(), x.size(), x) == 0)
+                    out.push_back(n);
+            }
+        }
+        closedir(d);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::string gba_port_dir(int port)
+{
+    return g_menu_gba_dir + "/port" + std::to_string(port + 1);
+}
+
+/* A GBA's exports: <port folder>/exports, and its game's name without the ending ("bios"). */
+std::string gba_exports(int port)
+{
+    return gba_port_dir(port) + "/exports";
+}
+
+std::string gba_stem(const Settings &p, int port)
+{
+    std::string stem = p.gba_rom[port].empty() ? "bios" : p.gba_rom[port];
+    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0)
+        stem.resize(dot);
+    return stem;
+}
+
+std::string gba_state_path(const Settings &p, int port, int slot)
+{
+    return gba_exports(port) + "/" + gba_stem(p, port) + ".ss" + std::to_string(std::clamp(slot, 1, 9));
+}
 
 /* What a row does. */
 enum class Kind
@@ -88,6 +145,14 @@ enum class Kind
     Cheat, /* one of the game's codes: on or off, from the next start */
     Shot,  /* Take Screenshot */
     Disc,  /* 3.1: Change Disc (a game on two discs) */
+    GbaReset, /* the GBA starts over (a GameCube port with a GBA), the game goes on */
+    GbaPick,  /* which GBA the rows below are for (more than one) */
+    GbaLink,  /* Disconnect: the GBA's link cable out, or in again */
+    GbaRom,   /* the GBA's game: a file in games/gba/portN (or none), put in with Cross */
+    GbaDo,    /* index: 4 / 5 load / save a GBA state, 6 / 7 import / export its save */
+    GbaCard,  /* an e-Reader card (games/gba/ereader), scanned with Cross */
+    GbaSlot,  /* the GBA state slot (1..9) Load / Save GBA State use */
+    GbaImport, /* one of the game's exported saves (its folder's exports), imported with Cross */
 };
 
 struct Row
@@ -128,6 +193,50 @@ std::vector<Row> rows_for(int tab, Settings &p, bool wii = false, const Patches 
         if (g_menu_discs > 1 || !g_menu_other_discs.empty())
             r.push_back({Kind::Disc, "", "Change Disc"});
         r.push_back({Kind::Restart, "", "Start Over"});
+        if (!wii_game && p.gba_port() >= 0)
+        {
+            /* The GBA rows: which GBA, then what Dolphin's GBA window can do to it. */
+            int count = 0;
+            for (int i = 0; i < 4; ++i)
+                count += p.port_has_gba(i) ? 1 : 0;
+            if (g_menu_gba < 0 || !p.port_has_gba(g_menu_gba))
+                g_menu_gba = p.gba_port();
+            const int port = g_menu_gba;
+            if (count > 1)
+                r.push_back({Kind::GbaPick, "", "GBA", nullptr, nullptr, 0, {}, true});
+            r.push_back({Kind::GbaReset, "", "Reset GBA", nullptr, nullptr, 0, {}, count <= 1});
+            r.push_back({Kind::GbaLink, "", "GBA Link Cable"});
+            g_menu_gba_roms = files_in(gba_port_dir(port), {".gba", ".agb", ".bin"});
+            g_menu_gba_rom_pick = 0;
+            for (std::size_t i = 0; i < g_menu_gba_roms.size(); ++i)
+                if (g_menu_gba_roms[i] == p.gba_rom[port])
+                    g_menu_gba_rom_pick = int(i) + 1;
+            r.push_back({Kind::GbaRom, "", "GBA Game"});
+            static const char *const kBeside[] = {"gba_rom1", "gba_rom2", "gba_rom3", "gba_rom4"};
+            r.push_back({Kind::Bool, kBeside[port], "GBA Save Beside the Game", nullptr, &p.gba_rom_beside[port], 0,
+                         {"Off", "On"}});
+            /* States: nine slots for the GBA's game; saves: exported with the date and time, and any
+             * of the game's there imported (newest first). */
+            r.push_back({Kind::GbaSlot, "", "GBA State Slot"});
+            r.push_back({Kind::GbaDo, "", "Load GBA State", nullptr, nullptr, 0, {}, false, 4});
+            r.push_back({Kind::GbaDo, "", "Save GBA State", nullptr, nullptr, 0, {}, false, 5});
+            r.push_back({Kind::GbaDo, "", "Export GBA Save", nullptr, nullptr, 0, {}, false, 7});
+            {
+                const std::string stem = gba_stem(p, port);
+                g_menu_gba_imports.clear();
+                for (const std::string &f : files_in(gba_exports(port), {".sav"}))
+                    if (f.size() > stem.size() && f.compare(0, stem.size(), stem) == 0 &&
+                        (f[stem.size()] == ' ' || f[stem.size()] == '.')) /* <game>.sav, <game> <date>.sav */
+                        g_menu_gba_imports.push_back(f);
+                std::reverse(g_menu_gba_imports.begin(), g_menu_gba_imports.end()); /* the dated ones: newest first */
+                g_menu_gba_import_pick = std::clamp(g_menu_gba_import_pick, 0,
+                                                    std::max(0, int(g_menu_gba_imports.size()) - 1));
+                r.push_back({Kind::GbaImport, "", "Import GBA Save"});
+            }
+            g_menu_gba_cards = files_in(g_menu_gba_dir + "/ereader", {".raw"});
+            if (!g_menu_gba_cards.empty())
+                r.push_back({Kind::GbaCard, "", "Scan e-Reader Card"});
+        }
         r.push_back({Kind::Library, "", "Quit to Library", nullptr, nullptr, 0, {}, true});
         r.push_back({Kind::Home, "", "Close Porpoise"});
         break;
@@ -156,6 +265,31 @@ std::vector<Row> rows_for(int tab, Settings &p, bool wii = false, const Patches 
         r.push_back({Kind::Int, "color_warmth", "Warmth", &p.color_warmth, nullptr, 0, kAdjust});
         r.push_back({Kind::Border, "border", "Border"});
         r.push_back({Kind::Bool, "fps_overlay", "FPS Counter", nullptr, &p.fps_overlay, 0, {"Off", "On"}});
+        if (!wii_game && p.gba_port() >= 0)
+        {
+            /* The GBA on a GameCube port: its screen over the game. */
+            r.push_back({Kind::Int, "gba_show_mode", "Show GBA Screen", &p.gba_show_mode, nullptr, 0,
+                         {"While Held", "Toggle", "On"}, true});
+            static const char *const kKeys[] = {"gba_window1", "gba_window2", "gba_window3", "gba_window4"};
+            static const char *const kSize[] = {"GBA 1 Screen Size", "GBA 2 Screen Size", "GBA 3 Screen Size",
+                                                "GBA 4 Screen Size"};
+            static const char *const kOpacity[] = {"GBA 1 Opacity", "GBA 2 Opacity", "GBA 3 Opacity", "GBA 4 Opacity"};
+            for (int i = 0; i < 4; ++i)
+                if (p.port_has_gba(i))
+                {
+                    r.push_back({Kind::Int, kKeys[i], kSize[i], &p.gba_window_size[i], nullptr, 0,
+                                 {"1x", "2x", "3x", "4x"}});
+                    r.push_back({Kind::Int, kKeys[i], kOpacity[i], &p.gba_window_opacity[i], nullptr, 0, {"40%", "50%", "60%", "70%", "80%", "90%", "100%"}});
+                    static const char *const kFilter[] = {"GBA 1 Screen Filter", "GBA 2 Screen Filter",
+                                                          "GBA 3 Screen Filter", "GBA 4 Screen Filter"};
+                    static const char *const kBlend[] = {"GBA 1 Interframe Blending", "GBA 2 Interframe Blending",
+                                                         "GBA 3 Interframe Blending", "GBA 4 Interframe Blending"};
+                    r.push_back({Kind::Int, kKeys[i], kFilter[i], &p.gba_window_filter[i], nullptr, 0,
+                                 {"Off", "Soft Pixels"}});
+                    r.push_back({Kind::Bool, kKeys[i], kBlend[i], nullptr, &p.gba_window_blend[i], 0, {"Off", "On"}});
+                }
+            r.push_back({Kind::Bool, "gba_web", "GBA Web Page", nullptr, &p.gba_web, 0, {"Off", "On"}});
+        }
         break;
     case kTabGraphics:
         r.push_back({Kind::Int, "shader_mode", "Shader Compilation", &p.shader_mode, nullptr, 0,
@@ -217,6 +351,29 @@ std::vector<Row> rows_for(int tab, Settings &p, bool wii = false, const Patches 
         if (wii)
             r.push_back({Kind::Int, "wiimote_speaker", "Wii Remote Speaker", &p.wiimote_speaker, nullptr, 0,
                          {"Off", "TV", "Controller"}});
+        if (!wii_game && p.gba_port() >= 0)
+        {
+            /* The GBA on a GameCube port: its sound. */
+            static const char *const kKeys[] = {"gba_window1", "gba_window2", "gba_window3", "gba_window4"};
+            static const char *const kVolume[] = {"GBA 1 Volume", "GBA 2 Volume", "GBA 3 Volume", "GBA 4 Volume"};
+            static const char *const kMute[] = {"Mute GBA 1", "Mute GBA 2", "Mute GBA 3", "Mute GBA 4"};
+            bool first = true;
+            for (int i = 0; i < 4; ++i)
+                if (p.port_has_gba(i))
+                {
+                    r.push_back({Kind::Int, kKeys[i], kVolume[i], &p.gba_window_volume[i], nullptr, 0, {"0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"}, first});
+                    r.push_back({Kind::Bool, kKeys[i], kMute[i], nullptr, &p.gba_window_muted[i], 0, {"Off", "On"}});
+                    static const char *const kSpeaker[] = {"GBA 1 Sound on the Controller", "GBA 2 Sound on the Controller",
+                                                           "GBA 3 Sound on the Controller", "GBA 4 Sound on the Controller"};
+                    static const char *const kSmooth[] = {"GBA 1 Speaker Resampling", "GBA 2 Speaker Resampling",
+                                                          "GBA 3 Speaker Resampling", "GBA 4 Speaker Resampling"};
+                    r.push_back({Kind::Bool, kKeys[i], kSpeaker[i], nullptr, &p.gba_window_speaker[i], 0,
+                                 {"Off", "On"}});
+                    r.push_back({Kind::Int, kKeys[i], kSmooth[i], &p.gba_window_smooth[i], nullptr, 0,
+                                 {"Simple", "Smooth"}});
+                    first = false;
+                }
+        }
         break;
     }
     case kTabControls:
@@ -743,6 +900,7 @@ int App::update_game_menu(const Input &in, double dt)
     Patches patches;
     patches.cheats = &menu_cheats_;
     g_menu_game_id = menu_game_ ? menu_game_->id : std::string();
+    g_menu_gba_dir = data_dir_ + "/games/gba";
     std::vector<Row> rows = rows_for(menu_tab_, p, menu_game_ && menu_game_->platform == "Wii", &patches);
     const int count = int(rows.size());
     if (menu_prompt_)
@@ -881,6 +1039,139 @@ int App::update_game_menu(const Input &in, double dt)
             g_menu_disc_chosen = g_menu_disc_pick;
             sfx(Sound::LaunchGame);
             return close(6); /* porpoise::core::kMenuChangeDisc */
+        }
+        break;
+    }
+    case Kind::GbaReset:
+        if (cross)
+        {
+            porpoise::core::reset_gba(g_menu_gba);
+            menu_note_ = tr("The GBA started over. The game goes on.");
+            sfx(Sound::LaunchGame);
+        }
+        break;
+    case Kind::GbaPick:
+        if (left || right || cross)
+        {
+            /* The next GBA (ports with one), round. */
+            for (int step = 1; step <= 4; ++step)
+            {
+                const int next = (g_menu_gba + (left ? 4 - step : step)) % 4;
+                if (p.port_has_gba(next))
+                {
+                    g_menu_gba = next;
+                    break;
+                }
+            }
+            sfx(Sound::MenuScroll);
+        }
+        break;
+    case Kind::GbaLink:
+        if (cross || left || right)
+        {
+            porpoise::core::toggle_gba_link(g_menu_gba);
+            menu_note_ = tr(porpoise::core::gba_connected(g_menu_gba) ? "The GBA's link cable is in again."
+                                                                       : "The GBA's link cable is out.");
+            sfx(Sound::MenuScroll);
+        }
+        break;
+    case Kind::GbaRom:
+    {
+        const int n = int(g_menu_gba_roms.size()) + 1; /* none, then the folder's games */
+        if (left || right)
+        {
+            g_menu_gba_rom_pick = (g_menu_gba_rom_pick + (left ? n - 1 : 1)) % n;
+            sfx(Sound::MenuScroll);
+        }
+        else if (cross)
+        {
+            /* Put it in (none: take it out); the GBA starts over with it. Kept for the next start. */
+            const int port = g_menu_gba;
+            p.gba_rom[port] = g_menu_gba_rom_pick > 0 ? g_menu_gba_roms[std::size_t(g_menu_gba_rom_pick - 1)] : "";
+            const std::string path = p.gba_rom[port].empty() ? "" : gba_port_dir(port) + "/" + p.gba_rom[port];
+            porpoise::core::gba_request(port, p.gba_rom_beside[port] ? 3 : 2, path);
+            menu_note_ = p.gba_rom[port].empty() ? tr("The GBA's game is out: the GBA starts with its BIOS alone.")
+                                                 : trf("{game} is in the GBA.", {{"game", p.gba_rom[port]}});
+            static const char *const kKeys[] = {"gba_rom1", "gba_rom2", "gba_rom3", "gba_rom4"};
+            key = kKeys[port];
+            sfx(Sound::LaunchGame);
+        }
+        break;
+    }
+    case Kind::GbaSlot:
+        if (left || right || cross)
+        {
+            g_menu_gba_slot = (g_menu_gba_slot - 1 + (left ? 8 : 1)) % 9 + 1;
+            sfx(Sound::MenuScroll);
+        }
+        break;
+    case Kind::GbaDo:
+        if (cross)
+        {
+            /* A state in the slot's file, or the save exported under the date and time. */
+            const int port = g_menu_gba;
+            mkdir(gba_exports(port).c_str(), 0777);
+            std::string path;
+            if (row.index == 7)
+            {
+                char when[32];
+                const std::time_t now = std::time(nullptr);
+                std::strftime(when, sizeof when, "%Y-%m-%d %H-%M-%S", std::localtime(&now));
+                path = gba_exports(port) + "/" + gba_stem(p, port) + " " + when + ".sav";
+            }
+            else
+                path = gba_state_path(p, port, g_menu_gba_slot);
+            struct stat st;
+            if (row.index == 4 && stat(path.c_str(), &st) != 0)
+            {
+                menu_note_ = trf("Slot {n} is empty.", {{"n", std::to_string(g_menu_gba_slot)}});
+                sfx(Sound::DetailsFlip);
+                break;
+            }
+            porpoise::core::gba_request(port, row.index, path);
+            menu_note_ = row.index == 4   ? trf("The GBA's state is loaded from slot {n}.", {{"n", std::to_string(g_menu_gba_slot)}})
+                         : row.index == 5 ? trf("The GBA's state is saved to slot {n}.", {{"n", std::to_string(g_menu_gba_slot)}})
+                                          : trf("The GBA's save is exported to {path}.", {{"path", path}});
+            sfx(Sound::LaunchGame);
+        }
+        break;
+    case Kind::GbaImport:
+    {
+        const int n = int(g_menu_gba_imports.size());
+        if ((left || right) && n > 0)
+        {
+            g_menu_gba_import_pick = (g_menu_gba_import_pick + (left ? n - 1 : 1)) % n;
+            sfx(Sound::MenuScroll);
+        }
+        else if (cross)
+        {
+            if (n == 0)
+            {
+                menu_note_ = trf("No saves for this game in {path}.", {{"path", gba_exports(g_menu_gba)}});
+                sfx(Sound::DetailsFlip);
+                break;
+            }
+            const std::string f = g_menu_gba_imports[std::size_t(std::clamp(g_menu_gba_import_pick, 0, n - 1))];
+            porpoise::core::gba_request(g_menu_gba, 6, gba_exports(g_menu_gba) + "/" + f);
+            menu_note_ = trf("{file} is the GBA's save now.", {{"file", f}});
+            sfx(Sound::LaunchGame);
+        }
+        break;
+    }
+    case Kind::GbaCard:
+    {
+        const int n = int(g_menu_gba_cards.size());
+        if ((left || right) && n > 0)
+        {
+            g_menu_gba_card_pick = (g_menu_gba_card_pick + (left ? n - 1 : 1)) % n;
+            sfx(Sound::MenuScroll);
+        }
+        else if (cross && n > 0)
+        {
+            const std::string card = g_menu_gba_cards[std::size_t(std::clamp(g_menu_gba_card_pick, 0, n - 1))];
+            porpoise::core::gba_request(g_menu_gba, 8, g_menu_gba_dir + "/ereader/" + card);
+            menu_note_ = trf("{card} is scanned into the GBA's e-Reader.", {{"card", card}});
+            sfx(Sound::LaunchGame);
         }
         break;
     }
@@ -1395,6 +1686,7 @@ void App::draw_game_menu(double time)
     patches.cheats = &menu_cheats_;
     const bool wii = menu_game_ && menu_game_->platform == "Wii";
     g_menu_game_id = menu_game_ ? menu_game_->id : std::string();
+    g_menu_gba_dir = data_dir_ + "/games/gba";
     const std::vector<Row> rows = rows_for(menu_tab_, p, wii, &patches);
     if (rows.empty())
     {
@@ -1461,6 +1753,62 @@ void App::draw_game_menu(double time)
             break;
         case Kind::FastForward:
             value = menu_ff_ == 0 ? tr("Off") : menu_ff_ == 1 ? "2x" : "4x";
+            break;
+        case Kind::GbaPick:
+            value = trf("GBA {n}", {{"n", std::to_string(g_menu_gba + 1)}});
+            arrows = true;
+            break;
+        case Kind::GbaLink:
+            value = tr(porpoise::core::gba_connected(g_menu_gba) ? "Connected" : "Disconnected");
+            break;
+        case Kind::GbaRom:
+            value = g_menu_gba_rom_pick > 0 && g_menu_gba_rom_pick <= int(g_menu_gba_roms.size())
+                        ? g_menu_gba_roms[std::size_t(g_menu_gba_rom_pick - 1)]
+                        : tr("None (BIOS)");
+            arrows = !g_menu_gba_roms.empty();
+            break;
+        case Kind::GbaSlot:
+        {
+            value = trf("Slot {n}", {{"n", std::to_string(g_menu_gba_slot)}});
+            struct stat st;
+            if (menu_draft_.port_has_gba(g_menu_gba) &&
+                stat(gba_state_path(menu_draft_, g_menu_gba, g_menu_gba_slot).c_str(), &st) != 0)
+                value += "  \xE2\x80\xA2  " + tr("Empty");
+            arrows = true;
+            break;
+        }
+        case Kind::GbaImport:
+        {
+            /* Its date and time (the game's name is the same for all: left out), and where it is in
+             * the list, newest first: "2026-11-01 14:05:33  •  2 of 5". */
+            const int n = int(g_menu_gba_imports.size());
+            if (n == 0)
+            {
+                value = tr("None");
+                break;
+            }
+            const int pick = std::clamp(g_menu_gba_import_pick, 0, n - 1);
+            std::string name = g_menu_gba_imports[std::size_t(pick)];
+            const std::string stem = gba_stem(menu_draft_, g_menu_gba);
+            if (name.size() >= stem.size() && name.compare(0, stem.size(), stem) == 0)
+                name = name.substr(stem.size());
+            if (name.size() >= 4 && name.compare(name.size() - 4, 4, ".sav") == 0)
+                name.resize(name.size() - 4);
+            while (!name.empty() && name.front() == ' ')
+                name.erase(name.begin());
+            /* "2026-11-01 14-05-33" (a file name can't have ':'): the time as a time. */
+            if (name.size() == 19 && name[10] == ' ' && name[13] == '-' && name[16] == '-')
+                name[13] = name[16] = ':';
+            value = (name.empty() ? tr("Undated") : name) + "  \xE2\x80\xA2  " +
+                    trf("{i} of {n}", {{"i", std::to_string(pick + 1)}, {"n", std::to_string(n)}});
+            arrows = n > 1;
+            break;
+        }
+        case Kind::GbaCard:
+            value = g_menu_gba_cards.empty()
+                        ? ""
+                        : g_menu_gba_cards[std::size_t(std::clamp(g_menu_gba_card_pick, 0, int(g_menu_gba_cards.size()) - 1))];
+            arrows = g_menu_gba_cards.size() > 1;
             break;
         case Kind::Disc:
         {

@@ -19,6 +19,8 @@ int open_ports();
 bool open(int player);
 /* Starts sending each Remote's sound to its player's controller. */
 void start(MixFn mix, RateFn rate);
+/* How the sound is made 48 kHz: the nearest sample (false), or between two (true). */
+void set_smooth(bool smooth);
 /* Stops sending (before the core goes). */
 void stop();
 /* Stops and closes the controller speakers. */
