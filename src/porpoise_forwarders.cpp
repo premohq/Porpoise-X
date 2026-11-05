@@ -381,7 +381,7 @@ Result make(const std::string &data_dir, const Options &o)
         std::fprintf(f,
                      "{\n  \"ageLevel\": {\"default\": 0},\n  \"applicationCategoryType\": 0,\n"
                      "  \"applicationDrmType\": \"free\",\n  \"attribute\": 0,\n  \"attribute2\": 0,\n"
-                     "  \"attribute3\": 524352,\n  \"conceptId\": \"%s\",\n  \"contentBadgeType\": 1,\n"
+                     "  \"attribute3\": %u,\n  \"conceptId\": \"%s\",\n  \"contentBadgeType\": 1,\n"
                      "  \"contentId\": \"UP9000-%s_00-PORPOISEFWD%s\",\n  \"contentVersion\": \"01.000.000\",\n"
                      "  \"downloadDataSize\": 0,\n"
                      "  \"gameIntent\": {\"permittedIntents\": [{\"intentType\": \"launchActivity\"}]},\n"
@@ -391,7 +391,8 @@ Result make(const std::string &data_dir, const Options &o)
                      "\"toolVersion\": \"2.00\"},\n"
                      "  \"requiredSystemSoftwareVersion\": \"0x0000000000000000\",\n"
                      "  \"sdkVersion\": \"0x0000000000000000\",\n  \"titleId\": \"%s\",\n  \"versionFileUri\": \"\"\n}\n",
-                     number.c_str(), r.title_id.c_str(), number.c_str(), json_escape(o.title).c_str(),
+                     o.vrr ? 0x40040u : 0x80040u, number.c_str(), r.title_id.c_str(), number.c_str(),
+                     json_escape(o.title).c_str(),
                      r.title_id.c_str());
         porpoise::finish_atomic(f, r.folder + "/sce_sys/param.json");
     }

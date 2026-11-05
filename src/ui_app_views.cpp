@@ -43,31 +43,93 @@ void App::release_far_art(int keep)
     Gfx &g = *g_;
     auto &games = lib_->games();
     const int shown = lib_->shown();
-    const int view = starcube() ? (settings_->sc_games == 0 ? 2 : 0) : settings_->lib_view;
+    const int view = starcube() ? (settings_->sc_games == 0 ? 2 : 0) : lib_view_now();
     const int disc_keep = starcube() ? keep : 5;
     const std::vector<int> docked = dock_shown() ? recent_games() : std::vector<int>(); /* Recently Played's */
+    /* The Porpoise look keeps the covers it has, shown or not, up to a budget:
+     * a switch between GameCube and Wii shows them at once. Over it, the ones
+     * furthest away go first - those in no filter shown now, then by distance.
+     * (Round 3 counted every cover against 48 and, with more than that loaded,
+     * let every far one go: a library of 55 reloaded at each switch.) */
+    constexpr int kKeepCovers = 84;
+    std::vector<char> drop(games.size(), 0);
+    if (glass())
+    {
+        std::vector<int> spare;
+        int loaded = 0;
+        for (int i = 0; i < int(games.size()); ++i)
+        {
+            const Game &game = games[std::size_t(i)];
+            if (!game.cover)
+                continue;
+            ++loaded;
+            if ((std::abs(i - selected_) > keep || i >= shown) &&
+                std::find(docked.begin(), docked.end(), i) == docked.end())
+                spare.push_back(i);
+        }
+        std::sort(spare.begin(), spare.end(), [&](int a, int b) {
+            const bool ha = a >= shown, hb = b >= shown;
+            if (ha != hb)
+                return ha;
+            return std::abs(a - selected_) > std::abs(b - selected_);
+        });
+        for (int i : spare)
+        {
+            if (loaded <= kKeepCovers)
+                break;
+            drop[std::size_t(i)] = 1;
+            --loaded;
+        }
+    }
     for (int i = 0; i < int(games.size()); ++i)
     {
         Game &game = games[std::size_t(i)];
-        const bool far = (std::abs(i - selected_) > keep || i >= shown) &&
-                         std::find(docked.begin(), docked.end(), i) == docked.end();
+        bool far = (std::abs(i - selected_) > keep || i >= shown) &&
+                   std::find(docked.begin(), docked.end(), i) == docked.end();
+        if (glass())
+            far = drop[std::size_t(i)] != 0;
         if (far && game.cover)
         {
             g.free_texture(game.cover);
             game.cover = nullptr;
             game.cover_tried = false;
         }
+        if (far && game.cover_old)
+        {
+            g.free_texture(game.cover_old);
+            game.cover_old = nullptr;
+        }
         /* Discs, backs and spines are only kept near the selection in the
          * views that show them (Details keeps the chosen game's). */
         const bool near_disc = (view == 2 && std::abs(i - selected_) <= disc_keep) ||
                                (settings_->recent_style == 3 &&
                                 std::find(docked.begin(), docked.end(), i) != docked.end()); /* Recently Played's discs */
-        const bool near_spine = view == 8 && std::abs(i - selected_) <= 22 && i < shown;
+        /* The Porpoise look's cases show their spines along the flow and the
+         * rows: kept near the selection (freed and asked for again each frame,
+         * they flickered). */
+        const bool near_spine = (view == 8 && std::abs(i - selected_) <= 22 && i < shown) ||
+                                (glass() && !drop[std::size_t(i)]); /* with its cover */
         if (!near_disc && i != selected_ && game.disc)
         {
             g.free_texture(game.disc);
             game.disc = nullptr;
             game.disc_tried = false;
+        }
+        /* Replaced pictures still waiting on their new ones go with them. */
+        if (i != selected_ && !near_disc && game.disc_old)
+        {
+            g.free_texture(game.disc_old);
+            game.disc_old = nullptr;
+        }
+        if (i != selected_ && !near_spine && game.spine_old)
+        {
+            g.free_texture(game.spine_old);
+            game.spine_old = nullptr;
+        }
+        if (i != selected_ && game.back_old && screen_ == Screen::Main && !(glass() && std::abs(i - selected_) <= 1))
+        {
+            g.free_texture(game.back_old);
+            game.back_old = nullptr;
         }
         if (i != selected_ && !near_spine && game.spine)
         {
@@ -75,7 +137,7 @@ void App::release_far_art(int keep)
             game.spine = nullptr;
             game.spine_tried = false;
         }
-        if (i != selected_ && game.back && screen_ == Screen::Main)
+        if (i != selected_ && game.back && screen_ == Screen::Main && !(glass() && std::abs(i - selected_) <= 1))
         {
             g.free_texture(game.back);
             game.back = nullptr;
@@ -351,6 +413,20 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
     Gfx &g = *g_;
     const bool toned = g.toned();
     g.set_tone(false); /* the case is black in every theme */
+    /* ...and in the Porpoise look, solid: its colours given as they are. (Its
+     * dark fills are made lighter and see-through for the menus' glass - the
+     * cases were grey, with the next case's art showing through their sides.) */
+    const Look look_was = g.look();
+    if (glass())
+    {
+        Look plain = look_was;
+        plain.hue = -1;
+        plain.saturation = 1;
+        plain.dark = 1;
+        plain.fill_alpha = 1;
+        plain.mono = false;
+        g.set_look(plain);
+    }
     const float hw = w * 0.5f, hh = h * 0.5f;
     struct P
     {
@@ -379,15 +455,87 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
             out[i] = corner(P{tl.x + du.x * uv[i][0] + dv.x * uv[i][1], tl.y + du.y * uv[i][0] + dv.y * uv[i][1],
                               tl.z + du.z * uv[i][0] + dv.z * uv[i][1]});
     };
-    const Color black = Color{0.035f, 0.038f, 0.045f, alpha};
+    /* The Porpoise look: a Wii game's case in white plastic, and the ones off
+     * to the side a little darker (box_bright_). */
+    const bool white = box_white_wii_ && game.platform == "Wii" && game.kind.empty();
+    const float lit = std::clamp(box_bright_, 0.0f, 1.0f);
+    /* The Porpoise look: the printed sleeve runs round the case in one piece -
+     * back, spine, front - with no plastic showing at the folds, only a hairline
+     * at the outer edges. */
+    const bool sleeve = glass();
+    auto face2 = [&](const P f[4], float iu0, float iu1, float iv, Corner out[4]) {
+        const P &tl = f[0], &tr = f[1], &bl = f[3];
+        const P du{tr.x - tl.x, tr.y - tl.y, tr.z - tl.z}, dv{bl.x - tl.x, bl.y - tl.y, bl.z - tl.z};
+        const float lu = std::sqrt(du.x * du.x + du.y * du.y + du.z * du.z);
+        const float lv = std::sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z);
+        const float u0 = lu > 0 ? iu0 / lu : 0, u1 = lu > 0 ? 1 - iu1 / lu : 1, v0 = lv > 0 ? iv / lv : 0;
+        const float uv[4][2] = {{u0, v0}, {u1, v0}, {u1, 1 - v0}, {u0, 1 - v0}};
+        for (int i = 0; i < 4; ++i)
+            out[i] = corner(P{tl.x + du.x * uv[i][0] + dv.x * uv[i][1], tl.y + du.y * uv[i][0] + dv.y * uv[i][1],
+                              tl.z + du.z * uv[i][0] + dv.z * uv[i][1]});
+    };
+    const float edge = 2.5f; /* the plastic's hairline round the sleeve */
+    /* 4.5: the plastic showing round the insert, as a real case has it (the
+     * insert runs from the open side's frame round the spine): a band at the
+     * top and the bottom, a wider one down the open side. */
+    const float et = sleeve ? std::max(edge, h * 0.012f) : edge, eb = sleeve ? std::max(edge, h * 0.0145f) : edge,
+                er = sleeve ? std::max(3.0f, w * 0.026f) : edge;
+    auto face3 = [&](const P f[4], float iu0, float iu1, float iv0, float iv1, Corner out[4]) {
+        const P &tl = f[0], &tr = f[1], &bl = f[3];
+        const P du{tr.x - tl.x, tr.y - tl.y, tr.z - tl.z}, dv{bl.x - tl.x, bl.y - tl.y, bl.z - tl.z};
+        const float lu = std::sqrt(du.x * du.x + du.y * du.y + du.z * du.z);
+        const float lv = std::sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z);
+        const float u0 = lu > 0 ? iu0 / lu : 0, u1 = lu > 0 ? 1 - iu1 / lu : 1;
+        const float v0 = lv > 0 ? iv0 / lv : 0, v1 = lv > 0 ? 1 - iv1 / lv : 1;
+        const float uv[4][2] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+        for (int i = 0; i < 4; ++i)
+            out[i] = corner(P{tl.x + du.x * uv[i][0] + dv.x * uv[i][1], tl.y + du.y * uv[i][0] + dv.y * uv[i][1],
+                              tl.z + du.z * uv[i][0] + dv.z * uv[i][1]});
+    };
+    /* Where the plastic lies over the insert's edge: a hairline of shade along it. */
+    auto tuck = [&](const P f[4], float iu0, float iu1, bool left_fold, float fa) {
+        if (!sleeve)
+            return;
+        const Color sh = white ? Color{0.0f, 0.0f, 0.0f, 0.16f * fa} : Color{0.0f, 0.0f, 0.0f, 0.45f * fa};
+        Corner l[4];
+        const P &tl = f[0], &tr = f[1];
+        const float lu = std::sqrt((tr.x - tl.x) * (tr.x - tl.x) + (tr.z - tl.z) * (tr.z - tl.z));
+        face3(f, iu0, iu1, et, h - et - 1.4f, l); /* along the top */
+        g.quad3d(nullptr, l, lu - iu0 - iu1, 1.4f, sh, 0, false, false);
+        face3(f, iu0, iu1, h - eb - 1.4f, eb, l); /* along the bottom */
+        g.quad3d(nullptr, l, lu - iu0 - iu1, 1.4f, sh, 0, false, false);
+        if (left_fold)
+            face3(f, lu - iu1 - 1.4f, iu1, et, eb, l); /* down the open side's frame */
+        else
+            face3(f, iu0, lu - iu0 - 1.4f, et, eb, l);
+        g.quad3d(nullptr, l, 1.4f, h - et - eb, sh, 0, false, false);
+    };
+    Color black = white ? Color{0.90f * lit, 0.91f * lit, 0.93f * lit, alpha}
+                        : Color{0.035f * lit, 0.038f * lit, 0.045f * lit, alpha};
+    if (white && sleeve)
+    {
+        /* A Wii case coloured to match its label (New Super Mario Bros. Wii's
+         * red): the plastic takes the spine's own colour, down its edges. */
+        const Texture *sp = game.spine ? game.spine : game.spine_old;
+        if (sp)
+        {
+            const float r = sp->edge[0], gg = sp->edge[1], b = sp->edge[2];
+            const float mx = std::max({r, gg, b}), mn = std::min({r, gg, b});
+            if (mx > 0.25f && (mx - mn) / mx > 0.45f)
+                black = Color{r * 0.92f * lit, gg * 0.92f * lit, b * 0.92f * lit, alpha};
+        }
+    }
+    const Color art_tint = Color{lit, lit, lit, alpha};
     /* spine_only: a case standing in a row of them, where its neighbours hide
      * its sides: the spine alone (a side face, seen past the next case's
      * spine, showed as a cover sliver across it). */
-    Texture *const cover_art = spine_only ? nullptr : load_art ? cover_of(game) : game.cover; /* far: no new loads */
-    const Color edge_light = Color{0.16f, 0.17f, 0.19f, alpha};
+    Texture *const cover_art = spine_only ? nullptr : load_art ? cover_of(game) : game.cover ? game.cover : game.cover_old; /* far: no new loads */
+    const Color edge_light = white ? Color{0.78f * lit, 0.80f * lit, 0.83f * lit, alpha}
+                                   : Color{0.16f * lit, 0.17f * lit, 0.19f * lit, alpha};
 
     /* Its shadow on the floor. */
-    g.blob(cx, cy + hh + 26, w * 1.3f, 60, rgba(0x000000, 0.5f * alpha));
+    g.blob(cx, cy + hh + 26, w * 1.3f, 60,
+           rgba(0x000000, (glass() && settings_->ui_mode == 2 ? 0.26f : 0.5f) * alpha)); /* (softer on Light) */
 
     const P front[4] = {{-hw, -hh, 0}, {hw, -hh, 0}, {hw, hh, 0}, {-hw, hh, 0}};
     const P back[4] = {{hw, -hh, depth}, {-hw, -hh, depth}, {-hw, hh, depth}, {hw, hh, depth}};
@@ -398,6 +546,20 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
     const float paper = 7; /* the plastic showing round the insert */
 
     Corner q[4];
+    /* The Porpoise look: the plastic's faces each a hair larger, so where two
+     * meet no light shows through their edges, and lit as plastic is - the
+     * top catching the light, the bottom in shade. */
+    auto shell = [&](const P f[4], Corner out[4]) {
+        if (sleeve)
+            face2(f, -0.8f, -0.8f, -0.8f, out);
+        else
+            for (int i = 0; i < 4; ++i)
+                out[i] = corner(f[i]);
+    };
+    auto shade = [&](float k) {
+        return Color{std::clamp(black.r + k, 0.0f, 1.0f), std::clamp(black.g + k, 0.0f, 1.0f),
+                     std::clamp(black.b + k, 0.0f, 1.0f), alpha};
+    };
     for (const P *f : {top, bottom})
     {
         if (spine_only)
@@ -405,27 +567,55 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
         for (int i = 0; i < 4; ++i)
             q[i] = corner(f[i]);
         if (seen(q))
-            g.quad3d(nullptr, q, w, depth, black, 2, false, false);
+        {
+            Corner sq[4];
+            shell(f, sq);
+            g.quad3d(nullptr, sq, w, depth, sleeve ? shade(f == top ? 0.07f : -0.03f) : black, 2, false, false);
+        }
     }
     for (int i = 0; i < 4; ++i)
         q[i] = corner(open_side[i]);
     if (!spine_only && seen(q))
     {
-        /* The open side: plastic, with the ridge of its clasp catching the light. */
-        g.quad3d(nullptr, q, depth, h, black, 3, false, false);
-        Corner r[4];
-        face(open_side, depth * 0.40f, h * 0.30f, r);
-        g.quad3d(nullptr, r, depth * 0.2f, h * 0.4f, edge_light, 1, false, false);
+        Corner sq[4];
+        shell(open_side, sq);
+        if (sleeve)
+        {
+            /* The open side: smooth plastic, a soft sheen down it. */
+            g.quad3d(nullptr, sq, depth, h, shade(0.03f), 3, false, false);
+            gloss_over(g, sq, depth, h, 3, cx / 1920.0f + yaw * 0.15f + 0.3f, alpha * 0.5f);
+        }
+        else
+        {
+            /* The open side: plastic, with the ridge of its clasp catching the light. */
+            g.quad3d(nullptr, q, depth, h, black, 3, false, false);
+            Corner r[4];
+            face(open_side, depth * 0.40f, h * 0.30f, r);
+            g.quad3d(nullptr, r, depth * 0.2f, h * 0.4f, edge_light, 1, false, false);
+        }
     }
     for (int i = 0; i < 4; ++i)
         q[i] = corner(spine[i]);
     if (seen(q))
     {
-        g.quad3d(nullptr, q, depth, h, black, 2, false, false);
+        Corner sq[4];
+        shell(spine, sq);
+        g.quad3d(nullptr, sq, depth, h, black, 2, false, false);
         Corner in[4];
-        face(spine, 3, paper, in);
+        if (sleeve)
+            face3(spine, 0, 0, et, eb, in);
+        else
+            face(spine, 3, paper, in);
         if (Texture *art = spine_of(game))
-            g.quad3d(art, in, depth - 6, h - paper * 2, with_alpha(kWhite, alpha), 1, false, false);
+        {
+            /* A hair in from each fold: a scan's fold is often a line of the
+             * neighbouring side's colour. Top and bottom, what the plastic
+             * covers of it on the front covers here too. */
+            const float cut_v0 = sleeve ? et / h : 0.0f, cut_v1 = sleeve ? 1.0f - eb / h : 1.0f;
+            const float spine_uv[4] = {0.035f, cut_v0, 0.965f, cut_v1};
+            g.quad3d(art, in, sleeve ? depth : depth - 6, sleeve ? h - et - eb : h - paper * 2, art_tint,
+                     sleeve ? 0.0f : 1.0f, false, false, sleeve ? spine_uv : nullptr);
+        }
         else
         {
             /* No spine art: a printed spine of its own - a Wii game's white,
@@ -450,14 +640,23 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
         q[i] = corner(back[i]);
     if (!spine_only && seen(q))
     {
-        g.quad3d(nullptr, q, w, h, black, 6, false, false);
+        {
+            Corner sq[4];
+            shell(back, sq);
+            g.quad3d(nullptr, sq, w, h, black, 6, false, false);
+        }
         Corner in[4];
-        face(back, paper, paper, in);
-        if (Texture *art = load_art ? back_of(game) : game.back)
+        const float bw = sleeve ? w - er : w - paper * 2, bh = sleeve ? h - et - eb : h - paper * 2;
+        if (sleeve)
+            face3(back, er, 0, et, eb, in); /* its right edge, seen from behind, is the spine's fold */
+        else
+            face(back, paper, paper, in);
+        if (Texture *art = load_art ? back_of(game) : game.back ? game.back : game.back_old)
         {
             float uv[4];
-            cover_uv(art, w - paper * 2, h - paper * 2, uv);
-            g.quad3d(art, in, w - paper * 2, h - paper * 2, with_alpha(kWhite, alpha), 3, false, false, uv);
+            cover_uv(art, bw, bh, uv);
+            g.quad3d(art, in, bw, bh, art_tint, sleeve ? 1.5f : 3.0f, false, false, uv);
+            tuck(back, er, 0, false, alpha);
         }
         else if (Texture *mark = logo_ ? logo_ : g.brand_mask())
         {
@@ -472,14 +671,23 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
         q[i] = corner(front[i]);
     if (!spine_only && seen(q))
     {
-        g.quad3d(nullptr, q, w, h, black, 6, false, false);
+        {
+            Corner sq[4];
+            shell(front, sq);
+            g.quad3d(nullptr, sq, w, h, black, 6, false, false);
+        }
         Corner in[4];
-        face(front, paper, paper, in);
+        const float fw = sleeve ? w - er : w - paper * 2, fh = sleeve ? h - et - eb : h - paper * 2;
+        if (sleeve)
+            face3(front, 0, er, et, eb, in); /* its left edge is the spine's fold */
+        else
+            face(front, paper, paper, in);
         if (Texture *cover = cover_art)
         {
             float uv[4];
-            cover_uv(cover, w - paper * 2, h - paper * 2, uv);
-            g.quad3d(cover, in, w - paper * 2, h - paper * 2, with_alpha(kWhite, alpha), 3, false, false, uv);
+            cover_uv(cover, fw, fh, uv);
+            g.quad3d(cover, in, fw, fh, art_tint, sleeve ? 1.5f : 3.0f, false, false, uv);
+            tuck(front, 0, er, true, alpha);
         }
         else
         {
@@ -487,8 +695,45 @@ void App::draw_box3d(Game &game, float cx, float cy, float w, float h, float dep
             draw_mark(cx, cy - h * 0.12f, w * 0.42f, with_alpha(rgba(0x6FD8FF), 0.9f * alpha));
         }
         gloss_over(g, q, w, h, 6, cx / 1920.0f + yaw * 0.1f, alpha);
+        if (sleeve)
+        {
+            /* The clear sleeve over the cover: a second, fainter sheen further
+             * along, and its top edge catching the light. */
+            gloss_over(g, q, w, h, 6, cx / 1920.0f + yaw * 0.1f + 0.45f, alpha * 0.35f);
+            Corner lip[4] = {corner(P{-hw + 1, -hh + et, -0.3f}), corner(P{hw - er, -hh + et, -0.3f}),
+                             corner(P{hw - er, -hh + et + 1.6f, -0.3f}), corner(P{-hw + 1, -hh + et + 1.6f, -0.3f})};
+            g.quad3d(nullptr, lip, w - er - 1, 1.6f, Color{1, 1, 1, 0.16f * alpha * lit}, 0, false, false);
+            /* The case's own top edge catching the light, a hairline along the plastic. */
+            Corner rim[4] = {corner(P{-hw + 2, -hh + 0.6f, -0.35f}), corner(P{hw - 3, -hh + 0.6f, -0.35f}),
+                             corner(P{hw - 3, -hh + 1.6f, -0.35f}), corner(P{-hw + 2, -hh + 1.6f, -0.35f})};
+            g.quad3d(nullptr, rim, w - 5, 1.0f, Color{1, 1, 1, (white ? 0.5f : 0.22f) * alpha * lit}, 0, false, false);
+        }
+        if (box_reflect_ > 0)
+        {
+            /* Its reflection on the floor: the bottom of the front, upside
+             * down, faint and gone within a third of its height. */
+            const float gap = 12, part = 0.34f;
+            auto below = [&](float x, float y) { return corner(P{x, hh + gap + (hh - y), 0}); };
+            const float top_y = hh - h * part;
+            Corner r[4] = {below(-hw, hh), below(hw, hh), below(hw, top_y), below(-hw, top_y)};
+            const float ra = box_reflect_ * alpha;
+            g.quad3d(nullptr, r, w, h * part, Color{black.r, black.g, black.b, ra}, 0, true, false);
+            if (Texture *cover = cover_art)
+            {
+                const float l0 = sleeve ? -hw : -hw + paper, r0 = sleeve ? hw - er : hw - paper;
+                const float b0 = sleeve ? hh - eb : hh - paper;
+                Corner ri[4] = {below(l0, b0), below(r0, b0), below(r0, top_y), below(l0, top_y)};
+                float uv[4];
+                cover_uv(cover, r0 - l0, b0 - (-hh + (sleeve ? et : paper)), uv);
+                /* Only the bottom part of the art: v from (1 - share) to 1 of its rectangle. */
+                const float share = (b0 - top_y) / (b0 - (-hh + (sleeve ? et : paper)));
+                const float uvp[4] = {uv[0], uv[3] - (uv[3] - uv[1]) * share, uv[2], uv[3]};
+                g.quad3d(cover, ri, r0 - l0, b0 - top_y, Color{lit, lit, lit, ra}, 0, true, true, uvp);
+            }
+        }
     }
     g.set_tone(toned);
+    g.set_look(look_was);
 }
 
 /* One game at a time: its box, big, on the left - the right stick turns it
@@ -901,7 +1146,8 @@ char letter_of(const Game &g)
 bool App::update_view_nav(bool left, bool right, bool up, bool down, double dt)
 {
     const int shown = lib_->shown();
-    const int view = settings_->lib_view;
+    const int view = lib_view_now();
+    const int shelf_cols = glass() ? 5 : kShelfCols; /* the Porpoise look's rows: five across */
     bool moved = false;
 
     /* Held, the scrolling speeds up: one game a step at first, then 3, then
@@ -964,7 +1210,7 @@ bool App::update_view_nav(bool left, bool right, bool up, bool down, double dt)
         }
         else
         {
-            const int page = view == 3 ? kShelfCols * 3 : 10;
+            const int page = view == 3 ? shelf_cols * 3 : 10;
             selected_ = std::clamp(selected_ + (ahead ? page : -page), 0, shown - 1);
         }
         if (selected_ != before)
@@ -1002,25 +1248,25 @@ bool App::update_view_nav(bool left, bool right, bool up, bool down, double dt)
     if (view == 3)
     {
         const int rows = step > 1 ? step / 3 + 1 : 1; /* 1, 2 or 4 rows a step */
-        if (up && selected_ >= kShelfCols)
+        if (up && selected_ >= shelf_cols)
         {
-            selected_ = std::max(selected_ % kShelfCols, selected_ - kShelfCols * rows);
+            selected_ = std::max(selected_ % shelf_cols, selected_ - shelf_cols * rows);
             moved = true;
         }
-        if (down && selected_ + kShelfCols < shown)
+        if (down && selected_ + shelf_cols < shown)
         {
-            int to = selected_ + kShelfCols * rows;
+            int to = selected_ + shelf_cols * rows;
             while (to >= shown)
-                to -= kShelfCols;
+                to -= shelf_cols;
             selected_ = to;
             moved = true;
         }
-        else if (down && selected_ / kShelfCols < (shown - 1) / kShelfCols)
+        else if (down && selected_ / shelf_cols < (shown - 1) / shelf_cols)
         {
             selected_ = shown - 1; /* the last row is short */
             moved = true;
         }
-        const float target = std::max(0.0f, float(selected_ / kShelfCols) - 0.0f);
+        const float target = std::max(0.0f, float(selected_ / shelf_cols) - 0.0f);
         row_scroll_ = settings_->reduced_motion ? target : smooth(row_scroll_, target, dt, 12.0f);
     }
     if (view == 4)

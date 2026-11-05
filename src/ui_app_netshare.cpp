@@ -826,10 +826,10 @@ void App::draw_share()
     SharePanel &p = share_;
     Gfx &g = *g_;
     const bool still = settings_ && settings_->reduced_motion;
-    p.anim = still ? 1.0f : std::min(1.0f, p.anim + 1.0f / 10.0f);
+    p.anim = still ? 1.0f : std::min(1.0f, p.anim + float(ui_dt_) * 6.0f); /* (open in 1/6 s, at 60 or 120 Hz) */
     const float t = ease_out(p.anim);
     const bool nfs = is_nfs(p.share);
-    p.slide = still ? (nfs ? 1.0f : 0.0f) : smooth(p.slide, nfs ? 1.0f : 0.0f, 1.0 / 60.0, 16.0f);
+    p.slide = still ? (nfs ? 1.0f : 0.0f) : smooth(p.slide, nfs ? 1.0f : 0.0f, ui_dt_, 16.0f);
     bool busy = false, finding = false, scanning = false;
     if (p.job)
     {

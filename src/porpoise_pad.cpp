@@ -13,7 +13,11 @@
  * becomes the next free player (the way ProsperoEden's pad.cpp does it). A
  * user who signs out frees their player. */
 #include "porpoise_pad.hpp"
+#include "porpoise_debuglog.hpp"
 #include "porpoise_aim.hpp"
+#include "porpoise_move.hpp"
+#include "porpoise_moveyaw.hpp"
+#include "porpoise_move_bridge.hpp"
 #ifdef PORPOISE_DESKTOP
 #include "porpoise_platform.hpp"
 #endif
@@ -175,10 +179,15 @@ constexpr unsigned kGcRetro[GcCount] = {
 
 struct Slot
 {
+    /* Whose it is (0..3), and whether it's a Move's (its motion only: the
+     * player's own controller is in g_slots). */
+    int player = 0;
+    bool is_move = false;
     std::int32_t user = -1;
     std::int32_t handle = -1;
     std::uint8_t motor_large = 0, motor_small = 0;
     State state;
+    State base; /* the controller's own reading, before the Move (player 1) goes on top */
     /* The pointer and its bookkeeping. */
     float pointer_x = 0, pointer_y = 0;
     std::uint64_t last_motion_us = 0;
@@ -193,6 +202,10 @@ struct Slot
     float eased[3] = {0, 0, 0};
     bool eased_valid = false;
     bool centre_was = false;
+    /* The sample's last 32 bytes as last logged (read_slot): looking for where
+     * a DualSense tells its charge. */
+    std::uint8_t tail[32] = {};
+    std::uint64_t tail_at_us = 0;
     /* The controller's orientation, and where the middle of the screen is. */
     aim::Fusion fusion;
     aim::Angles centre;
@@ -211,6 +224,18 @@ struct Slot
     bool centre_request = false; /* centre_now */
     aim::Smoother smoother;
     unsigned centrings = 0;  /* for the "centered" note on screen */
+    /* From REXCRAFT88's Move Studio work (github.com/REXCRAFT88/Porpoise-Dolphin-
+     * Emulator-for-PS5, branch feature/move-nav-integration): the last 32 gyroscope
+     * readings, so a centring made holding still also takes the gyroscope's drift
+     * from them; and the centre as last set (with the hold it was set for), so the
+     * centre from the setup carries into the game that starts after it. */
+    float gyro_hist[32][3] = {};
+    unsigned gyro_hist_n = 0, gyro_hist_next = 0;
+    std::uint64_t centred_at_us = 0;
+    aim::Angles kept_centre;
+    aim::Basis kept_basis = aim::kGripNormal;
+    int kept_pose = -1, kept_controller = -1, kept_grip = -1;
+    bool kept_move = false;
     /* Fast forward on the touch pad (touch pad + R1, touch pad + R2): the
      * buttons last frame, whether this touch pad press was a combo, and the
      * touch pad's own press (Minus on a Wii Remote) still to be sent. */
@@ -363,7 +388,61 @@ int classify_pose(const float accel[3], const WiiConfig &c, bool second)
 
 
 Slot g_slots[kMaxPlayers];
+/* Each player's own set-up (for_player of g_wii), made in set_wii: what their
+ * controller plays as, and whether they hold a Move. */
+WiiConfig g_wii_for[kMaxPlayers];
+/* A player's PlayStation Move (4.5 Beta 4: any player's). Player 1's is the one the
+ * PS5 itself reads (porpoise_move.cpp), or else one from REXCRAFT88's Move
+ * Management, as players 2 to 4's always are: it runs its own Bluetooth host and
+ * sends each player's Move (UDP 9976 + player) and Navigation controller (9980 +
+ * player) over local UDP. His client (porpoise_move_bridge.hpp) checks every
+ * packet and drops stale ones; its sockets are open only while a player is set
+ * up to use them. The Move's motion goes through read_motion in its own slot, as
+ * a DualSense's would. */
+struct MoveRun
+{
+    Slot slot;
+    Motion motion;
+    /* Gravity as the Move feels it (g), learnt while it isn't swung: its swings
+     * are scaled about it (WiiConfig::swing). */
+    float gravity[3] = {0, 0, 1};
+    bool live = false;         /* read last poll (a new connection starts afresh) */
+    bool native = false;       /* and from the PS5 itself (player 1's) */
+    std::uint64_t live_us = 0; /* when it last was */
+    /* Its Start: held a second, the in-game menu (or, in Porpoise's menus, the
+     * pointer); a tap, Start itself, given as it's let go. */
+    std::uint64_t start_us = 0, start_pulse_us = 0;
+    bool start_long = false;
+    unsigned holds = 0;
+    porpoise::move_bridge::Client mm, nav;
+    bool mm_open = false, mm_was = false, nav_open = false, nav_was = false;
+    std::uint64_t mm_tried_us = 0, nav_tried_us = 0; /* a port that wouldn't open is tried again later */
+    std::uint64_t native_us = 0; /* player 1: when the PS5's own Move was last read */
+    /* The rumble last sent to Move Management, and when: its packet lasts a
+     * quarter second, so a running motor is sent again before that. */
+    std::uint8_t sent_large = 0, sent_small = 0;
+    std::uint64_t rumble_sent_us = 0;
+};
+MoveRun g_mv[kMaxPlayers];
+/* Until when the Controller Hub is open (watching_players): players 2 to 4's
+ * Moves are listened to outside Wii games then too, so it can show them. */
+std::atomic<std::uint64_t> g_hub_until_us{0};
+Slot &g_move_slot = g_mv[0].slot; /* player 1's Move */
+/* Each slot knows whose it is (set again whenever a slot is emptied). */
+const bool g_slots_named = [] {
+    for (int p = 0; p < kMaxPlayers; ++p)
+    {
+        g_slots[p].player = p;
+        g_mv[p].slot.player = p;
+        g_mv[p].slot.is_move = true;
+    }
+    return true;
+}();
 PadSample g_samples[sample_capacity];
+/* The Move's samples as read (g_samples carries them with the swing curve on):
+ * what the camera's drift fix compares with the ball (porpoise_moveyaw.hpp). */
+float g_move_true_accel[sample_capacity][3];
+std::uint64_t g_yaw_report_us = 0;
 const State g_none{};
 Mapping g_mapping = preset(LayoutPlayStation);
 std::atomic<bool> g_rumble_enabled{true};
@@ -427,7 +506,11 @@ void push_rumble(Slot &slot)
     if (slot.handle < 0)
         return;
     ScePadVibrationParam param{};
-    if (g_rumble_enabled.load(std::memory_order_relaxed))
+    /* The Move is the Remote: the game's rumble is the Move's alone (Oct 25:
+     * the DualSense, the Nunchuk, buzzed along with it). */
+    const WiiConfig &w = g_wii_for[slot.player];
+    const bool move_has_it = !slot.is_move && w.active && w.move;
+    if (g_rumble_enabled.load(std::memory_order_relaxed) && !move_has_it)
     {
         param.largeMotor = slot.motor_large;
         param.smallMotor = slot.motor_small;
@@ -458,6 +541,7 @@ void open_slot(int player, std::int32_t user, int attempts)
     }
     Slot &slot = g_slots[player];
     slot = Slot{};
+    slot.player = player;
     slot.user = user;
     slot.handle = handle;
     (void)scePadSetVibrationMode(handle, 2);
@@ -490,6 +574,7 @@ void close_slot(int player)
     std::snprintf(line, sizeof line, "pad: player %d left", player + 1);
     ps5::debug::mark(line);
     slot = Slot{};
+    slot.player = player;
 }
 
 /* Users who signed in join as the next free player; users who signed out leave. */
@@ -529,8 +614,71 @@ void rescan(const std::int32_t *ids)
 
 /* The motion in this poll's readings: each one fused into the controller's
  * orientation, in order; the newest as it is for the readout and the core. */
+/* From REXCRAFT88's Move Studio work (feature/move-nav-integration): a centring
+ * made holding the controller still also takes the gyroscope's drift from its last
+ * readings (their average), as long as they barely varied - a centring made while
+ * turning leaves the drift as it was. */
+void relearn_drift(Slot &slot)
+{
+    if (slot.gyro_hist_n < 16)
+        return;
+    const float n = float(slot.gyro_hist_n);
+    float mean[3] = {0, 0, 0}, var[3] = {0, 0, 0};
+    for (unsigned i = 0; i < slot.gyro_hist_n; ++i)
+        for (int a = 0; a < 3; ++a)
+            mean[a] += slot.gyro_hist[i][a] / n;
+    for (unsigned i = 0; i < slot.gyro_hist_n; ++i)
+        for (int a = 0; a < 3; ++a)
+        {
+            const float d = slot.gyro_hist[i][a] - mean[a];
+            var[a] += d * d / n;
+        }
+    /* (the Move's gyroscope reads ~0.1 rad/s at rest: a real drift for it) */
+    const float most = slot.is_move ? 0.3f : 0.08f;
+    for (int a = 0; a < 3; ++a)
+        if (!std::isfinite(mean[a]) || std::fabs(mean[a]) > most || var[a] > 0.0004f)
+            return;
+    for (int a = 0; a < 3; ++a)
+        slot.fusion.bias[a] = mean[a];
+}
+
+/* The centre just set, and the hold it was set for: a game that starts soon after,
+ * held the same way, keeps it (set_wii). */
+void keep_centre(Slot &slot)
+{
+    slot.centred_at_us = monotonic_us();
+    slot.kept_centre = slot.centre;
+    slot.kept_basis = slot.basis;
+    slot.kept_pose = slot.pose;
+    const WiiConfig &w = g_wii_for[slot.player];
+    slot.kept_controller = w.controller;
+    slot.kept_grip = w.grip;
+    slot.kept_move = w.move;
+}
+
+/* A controller that comes back (the Move off and on again): its motion starts
+ * afresh - drift, orientation, smoothing and centre - so nothing stale carries
+ * over. From REXCRAFT88's Move Studio work: reset on a new connection. */
+void fresh_motion(Slot &slot)
+{
+    slot.last_motion_us = 0;
+    slot.fusion = {};
+    slot.smoother = {};
+    slot.centred = false;
+    slot.pose = -1;
+    slot.pose_wait = 0;
+    slot.up[0] = slot.up[1] = slot.up[2] = 0;
+    slot.centre_hold = 0;
+    slot.centre_was = false;
+    slot.pointer_x = slot.pointer_y = 0;
+    slot.gyro_hist_n = slot.gyro_hist_next = 0;
+    slot.shake_frames = 0;
+    slot.centred_at_us = 0;
+}
+
 Motion read_motion(Slot &slot, std::int32_t count)
 {
+    const WiiConfig &w = g_wii_for[slot.player];
     Motion m;
     const PadSample *order[sample_capacity];
     int n = 0;
@@ -541,13 +689,44 @@ Motion read_motion(Slot &slot, std::int32_t count)
     if (n == 0)
         return m;
     float elapsed = 0;
+    /* The strongest moment since the last poll: a swing's peak lasts a few
+     * hundredths of a second and falls between polls, so the game is given the
+     * sample furthest from gravity, not just the newest (Wii tennis missed swings). */
+    const PadSample *peak = nullptr;
+    float peak_dev = -1;
     for (int i = 0; i < n; ++i)
     {
         const PadSample &p = *order[i];
         if (slot.last_motion_us && p.timestamp_us <= slot.last_motion_us)
             continue; /* already seen */
+        {
+            float d2 = 0;
+            for (int a = 0; a < 3; ++a)
+            {
+                const float d = p.acceleration[a] - slot.up[a];
+                d2 += d * d;
+            }
+            if (d2 > peak_dev)
+            {
+                peak_dev = d2;
+                peak = &p;
+            }
+        }
         const float dt = slot.last_motion_us ? float(p.timestamp_us - slot.last_motion_us) * 1e-6f : 0.0f;
+        slot.fusion.steady = slot.is_move; /* (the Move's drift, learnt its own way) */
         aim::fuse(slot.fusion, p.angular_velocity, p.acceleration, dt);
+        if (&slot == &g_move_slot && g_mv[0].native && slot.fusion.started)
+        {
+            const float turning[3] = {p.angular_velocity[0] - slot.fusion.bias[0],
+                                      p.angular_velocity[1] - slot.fusion.bias[1],
+                                      p.angular_velocity[2] - slot.fusion.bias[2]};
+            porpoise::moveyaw::imu(double(p.timestamp_us) * 1e-6, slot.fusion.q, g_move_true_accel[&p - g_samples],
+                                   turning);
+        }
+        for (int a = 0; a < 3; ++a)
+            slot.gyro_hist[slot.gyro_hist_next][a] = p.angular_velocity[a];
+        slot.gyro_hist_next = (slot.gyro_hist_next + 1) % 32;
+        slot.gyro_hist_n = std::min(slot.gyro_hist_n + 1, 32u);
         slot.last_motion_us = p.timestamp_us;
         elapsed += std::min(dt, 0.05f);
         const bool first = slot.up[0] == 0 && slot.up[1] == 0 && slot.up[2] == 0;
@@ -556,11 +735,12 @@ Motion read_motion(Slot &slot, std::int32_t count)
             slot.up[a] += (p.acceleration[a] - slot.up[a]) * k;
     }
     const PadSample &last = *order[n - 1];
+    const PadSample &strongest = peak && peak_dev > 0.04f ? *peak : last; /* (at rest: the newest) */
     m.valid = true;
     m.samples = unsigned(n);
     for (int i = 0; i < 3; ++i)
     {
-        m.raw_accel[i] = last.acceleration[i];
+        m.raw_accel[i] = strongest.acceleration[i];
         m.raw_gyro[i] = last.angular_velocity[i];
         m.gyro_bias[i] = slot.fusion.bias[i];
     }
@@ -572,16 +752,16 @@ Motion read_motion(Slot &slot, std::int32_t count)
     /* How it is held. Read when the pointer is centred; after that a
      * different hold has to be seen steadily for a few seconds (so a punch or
      * a swing never flips it). */
-    const int index = int(&slot - g_slots);
-    const bool second = g_wii.controller == WiiTwoControllers && index == 1;
+    const int index = slot.player;
+    const bool second = w.controller == WiiTwoControllers && index == 1;
     float g[3];
     for (int i = 0; i < 3; ++i)
         g[i] = m.raw_gyro[i] - slot.fusion.bias[i];
     const float turning = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
-    const int seen = classify_pose(slot.up, g_wii, second);
+    const int seen = classify_pose(slot.up, w, second);
     bool reposed = false;
     if (slot.pose < 0)
-        slot.pose = seen >= 0 ? seen : expected_pose(g_wii, second);
+        slot.pose = seen >= 0 ? seen : expected_pose(w, second);
     else if (slot.centred && seen >= 0 && seen != slot.pose && turning < 1.0f)
     {
         if (seen != slot.pose_seen)
@@ -607,8 +787,8 @@ Motion read_motion(Slot &slot, std::int32_t count)
     /* R1 has to be held a moment with the controller fairly still: a squeeze
      * of the grip mid-swing (R1 sits just above R2) never centres. */
     const bool centre_held = (last.buttons & (pose_left_hand(slot.pose) ? pad_l1 : pad_r1)) != 0;
-    const bool centre_button = g_wii.controller != WiiSideways && g_wii.controller != WiiClassic &&
-                               g_wii.controller != WiiGameCube && !second && !g_wii.menu;
+    const bool centre_button = w.controller != WiiSideways && w.controller != WiiClassic &&
+                               w.controller != WiiGameCube && !second && !w.menu;
     bool pressed_centre = false;
     if (!centre_held || !centre_button)
     {
@@ -632,15 +812,40 @@ Motion read_motion(Slot &slot, std::int32_t count)
     {
         if ((pressed_centre || follow) && seen >= 0)
             slot.pose = seen; /* centring also reads the hold again */
+        if (pressed_centre)
+            relearn_drift(slot); /* REXCRAFT88: held still, the drift is what it reads */
         aim::level_grip(pose_basis(slot.pose), slot.up, slot.basis);
+        if (pressed_centre && &slot == &g_move_slot && slot.centred && porpoise::debuglog::on())
+        {
+            /* How far the pointer had wandered since it was last centred (the
+             * player points at the middle of the screen to centre). */
+            const aim::Angles now = aim::remote_angles(slot.fusion, slot.basis);
+            float yaw = now.yaw - slot.centre.yaw;
+            while (yaw > 3.14159265f)
+                yaw -= 6.2831853f;
+            while (yaw < -3.14159265f)
+                yaw += 6.2831853f;
+            porpoise::debuglog::app("move: centred again: it had wandered %.1f deg across, %.1f deg up/down in %.0f s "
+                                    "(drift %.3f %.3f %.3f rad/s)",
+                                    yaw * 57.2958f, (now.pitch - slot.centre.pitch) * 57.2958f,
+                                    double(monotonic_us() - slot.centred_at_us) * 1e-6, slot.fusion.bias[0],
+                                    slot.fusion.bias[1], slot.fusion.bias[2]);
+        }
         slot.centre = aim::remote_angles(slot.fusion, slot.basis);
         slot.centred = true;
         slot.pose_wait = 0;
         slot.centre_seq = g_centre_seq;
-        if (pressed_centre && g_wii.controller == WiiTwoControllers && index == 0)
+        /* REXCRAFT88: the pointer lands in the middle at once, not eased there. */
+        slot.smoother = {};
+        if (pressed_centre && w.controller == WiiTwoControllers && index == 0)
             ++g_centre_seq;
+        if (&slot == &g_move_slot && g_mv[0].native)
+            porpoise::moveyaw::centred(); /* (here is "ahead": the camera's fix starts from it) */
         if (pressed_centre)
+        {
             ++slot.centrings;
+            keep_centre(slot);
+        }
     }
     m.centrings = slot.centrings;
     if (!slot.centred)
@@ -650,7 +855,7 @@ Motion read_motion(Slot &slot, std::int32_t count)
     /* For the core: the Remote's (or the Nunchuk's) own axes, the gyroscope
      * without its drift. */
     aim::Basis motion_basis = slot.basis;
-    if (g_wii.controller == WiiSideways)
+    if (w.controller == WiiSideways)
     {
         /* Held sideways (like an NES pad: the D-pad under the left thumb, so
          * the Remote's pointing end to the left) the Remote's own axes are a
@@ -703,11 +908,11 @@ Motion read_motion(Slot &slot, std::int32_t count)
         m.rel_yaw = dyaw;
         m.rel_pitch = now.pitch - slot.centre.pitch;
     }
-    aim::Scale scale = aim::scale_for(g_wii.speed, g_wii.half_x, g_wii.half_y);
-    const float reach = float(std::clamp(g_wii.reach, 50, 200)) / 100.0f;
+    aim::Scale scale = aim::scale_for(w.speed, w.half_x, w.half_y);
+    const float reach = float(std::clamp(w.reach, 50, 200)) / 100.0f;
     scale.half_x /= reach;
     scale.half_y /= reach;
-    if (g_wii.pointer == PointerGyro)
+    if (w.pointer == PointerGyro)
     {
         float x = 0, y = 0;
         if (slot.centred)
@@ -716,10 +921,10 @@ Motion read_motion(Slot &slot, std::int32_t count)
             if (turning < 0.5f)
                 aim::ease_edge(now, slot.centre, scale, elapsed);
             aim::pointer(now, slot.centre, scale, x, y);
-            slot.smoother.step(x, y, elapsed, g_wii.smooth);
+            slot.smoother.step(x, y, elapsed, w.smooth);
         }
-        m.aim_x = g_wii.invert_x ? -x : x;
-        m.aim_y = g_wii.invert_y ? -y : y;
+        m.aim_x = w.invert_x ? -x : x;
+        m.aim_y = w.invert_y ? -y : y;
     }
     m.touching = (last.touch_count & 0x7f) > 0;
     if (m.touching)
@@ -727,7 +932,7 @@ Motion read_motion(Slot &slot, std::int32_t count)
         m.touch_x = last.touch[0].x;
         m.touch_y = last.touch[0].y;
     }
-    if (g_wii.pointer == PointerTouch)
+    if (w.pointer == PointerTouch)
     {
         if (m.touching)
         {
@@ -756,7 +961,7 @@ Motion read_motion(Slot &slot, std::int32_t count)
     }
     else
         slot.flick_run = 0;
-    if (g_wii.shake && flick)
+    if (w.shake && flick)
         slot.shake_frames = 8;
     m.shaking = slot.shake_frames > 0;
     if (slot.shake_frames > 0)
@@ -848,12 +1053,13 @@ bool read_gba(Slot &slot, std::uint32_t raw, const PadSample &sample, State &nex
 
 State read_slot(Slot &slot)
 {
+    const WiiConfig &w = g_wii_for[slot.player];
     const std::int32_t count = scePadRead(slot.handle, g_samples, sample_capacity);
     if (count == 0)
     {
-        slot.state.ff_step = false; /* a press counts once, not again on every repeat of the state */
-        slot.state.quick_save = slot.state.quick_load = slot.state.screenshot = false;
-        return slot.state; /* nothing new: keep the last state */
+        slot.base.ff_step = false; /* a press counts once, not again on every repeat of the state */
+        slot.base.quick_save = slot.base.quick_load = slot.base.screenshot = false;
+        return slot.base; /* nothing new: keep the last state */
     }
     if (count < 0 || count > sample_capacity)
         return State{}; /* refused, or the pad went away: nothing rather than a stuck button */
@@ -863,6 +1069,27 @@ State read_slot(Slot &slot)
             newest = &g_samples[i];
     if (newest == nullptr || !newest->connected || (newest->buttons & pad_intercepted) != 0)
         return State{}; /* off, or the system menu has the pad: release everything */
+    {
+        /* A DualSense's charge isn't in what Porpoise reads, as far as is
+         * known: the sample's last bytes go to the log when they change (at
+         * most every 20 seconds, 60 lines a run), to find out whether it's
+         * there after all. */
+        static int lines = 0;
+        static_assert(sizeof(PadSample) - offsetof(PadSample, extension) == sizeof slot.tail, "the sample's tail");
+        const auto *tail = reinterpret_cast<const std::uint8_t *>(newest) + offsetof(PadSample, extension);
+        if (lines < 60 && std::memcmp(tail, slot.tail, sizeof slot.tail) != 0 &&
+            newest->timestamp_us - slot.tail_at_us > 20000000ull)
+        {
+            std::memcpy(slot.tail, tail, sizeof slot.tail);
+            slot.tail_at_us = newest->timestamp_us;
+            ++lines;
+            char line[160];
+            int k = std::snprintf(line, sizeof line, "pad: tail of user %d:", int(slot.user));
+            for (std::size_t i = 0; i < sizeof slot.tail && k > 0 && k < int(sizeof line) - 4; ++i)
+                k += std::snprintf(line + k, sizeof line - std::size_t(k), " %02x", tail[i]);
+            ps5::debug::mark(line);
+        }
+    }
     const Motion motion = read_motion(slot, count);
 
     /* The touch pad is the fast-forward modifier: touch pad + R1 steps fast
@@ -999,6 +1226,12 @@ State read_slot(Slot &slot)
     next.left_y = stick(newest->left_y);
     next.right_x = stick(newest->right_x);
     next.right_y = stick(newest->right_y);
+    if (w.active && w.nunchuk_right)
+    {
+        /* The Nunchuk's DualSense in the right hand: its right stick is the Nunchuk's. */
+        std::swap(next.left_x, next.right_x);
+        std::swap(next.left_y, next.right_y);
+    }
     /* The GameCube's L and R are analog: on L2 / R2 they follow the trigger,
      * on any other control they are all or nothing. */
     auto analog = [&](int gc) -> std::int16_t {
@@ -1013,7 +1246,7 @@ State read_slot(Slot &slot)
     next.r2 = analog(GcR);
     next.ps_menu_combo = (newest->buttons & (pad_options | pad_touch_pad)) == (pad_options | pad_touch_pad);
     next.motion = motion;
-    if (g_wii.active && g_wii.controller != WiiGameCube)
+    if (w.active && w.controller != WiiGameCube)
     {
         /* A Wii game: the Wii controller's buttons instead of the GameCube's
          * (a GameCube controller in a Wii game keeps the GameCube's). */
@@ -1031,28 +1264,313 @@ State read_slot(Slot &slot)
                 out |= stick_dpad(next.right_x, next.right_y, retro);
             return out;
         };
-        const int *retro = retro_table(g_wii.controller);
-        next.joypad = bits(wii_layout(g_wii, false, slot.pose), retro);
+        const int *retro = retro_table(w.controller);
+        next.joypad = bits(wii_layout(w, false, slot.pose), retro);
         /* A flick is sent as a shake only where the game doesn't feel the
          * motion itself. */
-        const bool with_nunchuk = g_wii.controller == WiiRemoteNunchuk || g_wii.controller == WiiTwoControllers;
-        const bool remote_feels = g_wii.motion && (!with_nunchuk || g_nunchuk_motion);
-        if (motion.shaking && g_wii.controller != WiiClassic && !remote_feels)
+        const bool with_nunchuk = w.controller == WiiRemoteNunchuk || w.controller == WiiTwoControllers;
+        const bool remote_feels = w.motion && (!with_nunchuk || g_nunchuk_motion);
+        if (motion.shaking && w.controller != WiiClassic && !remote_feels)
             next.joypad |= static_cast<std::uint16_t>(1u << RETRO_DEVICE_ID_JOYPAD_R2);
-        if (g_wii.controller == WiiClassic)
+        if (w.controller == WiiClassic)
         {
             next.l2 = static_cast<std::int16_t>(left_trigger * 0x7fff / 255);
             next.r2 = static_cast<std::int16_t>(right_trigger * 0x7fff / 255);
         }
-        if (g_wii.controller == WiiTwoControllers)
+        if (w.controller == WiiTwoControllers)
         {
             /* The same controller as the second one: its Nunchuk buttons. */
-            next.nunchuk = bits(wii_layout(g_wii, true, slot.pose), kRetroNunchuk);
-            if (motion.shaking && !(g_wii.motion && g_nunchuk_motion))
+            next.nunchuk = bits(wii_layout(w, true, slot.pose), kRetroNunchuk);
+            if (motion.shaking && !(w.motion && g_nunchuk_motion))
                 next.nunchuk |= static_cast<std::uint16_t>(1u << RETRO_DEVICE_ID_JOYPAD_L2);
         }
     }
     return next;
+}
+
+/* Move Management's buttons (its wire's bits, docs/PROTOCOL.md in REXCRAFT88's
+ * Move-Management-PS5) as porpoise::move's. T is L2 and its analog byte. */
+std::uint32_t managed_buttons(const std::uint8_t *pad)
+{
+    std::uint32_t b = 0;
+    std::memcpy(&b, pad, sizeof b);
+    std::uint32_t out = 0;
+    if (b & 0x1000u)
+        out |= porpoise::move::kTriangle;
+    if (b & 0x2000u)
+        out |= porpoise::move::kCircle;
+    if (b & 0x4000u)
+        out |= porpoise::move::kCross;
+    if (b & 0x8000u)
+        out |= porpoise::move::kSquare;
+    if (b & 0x1u)
+        out |= porpoise::move::kSelect;
+    if (b & 0x8u)
+        out |= porpoise::move::kStart;
+    if (b & 0x10000u)
+        out |= porpoise::move::kPS;
+    if (b & 0x20000u)
+        out |= porpoise::move::kMove;
+    if ((b & 0x100u) || pad[8] > 40)
+        out |= porpoise::move::kT;
+    return out;
+}
+
+/* A player's Move from Move Management (UDP 9976 + player): its samples since the
+ * last poll, in a DualSense's axes (its stream already is: x, y up out of the
+ * face, z toward the player), and its buttons. False while it isn't sending. A
+ * port that can't be opened (another app has it) is tried again every two
+ * seconds, not every frame. */
+bool take_managed_move(int player, MoveRun &mv, std::uint64_t now, porpoise::move::Sample *ms, int &n,
+                       std::uint32_t &pressed)
+{
+    n = 0;
+    pressed = 0;
+    if (!mv.mm_open)
+    {
+        if (mv.mm_tried_us && now - mv.mm_tried_us < 2000000ull)
+            return false;
+        mv.mm_tried_us = now;
+        mv.mm_open = mv.mm.open(static_cast<std::uint16_t>(9976 + player));
+        porpoise::debuglog::app("move: player %d: %s (UDP %d)", player + 1,
+                                mv.mm_open ? "listening for Move Management's Move" : "Move Management's port couldn't be opened",
+                                9976 + player);
+        if (!mv.mm_open)
+            return false;
+    }
+    mv.mm.poll(now);
+    const bool here = mv.mm.fresh(now);
+    if (here != mv.mm_was)
+        porpoise::debuglog::app("move: player %d: %s", player + 1,
+                                here ? "Move Management's Move connected" : "Move Management's Move gone");
+    mv.mm_was = here;
+    std::uint8_t pads[porpoise::move_bridge::Client::kRecent][120];
+    const int got = mv.mm.take_pads(pads, std::min(porpoise::move_bridge::Client::kRecent, sample_capacity));
+    if (!here)
+        return false;
+    for (int i = 0; i < got && n < sample_capacity; ++i)
+    {
+        const std::uint8_t *pad = pads[i];
+        std::uint32_t connected = 0;
+        std::memcpy(&connected, pad + 76, sizeof connected);
+        if (connected != 1)
+            continue;
+        porpoise::move::Sample &out = ms[n];
+        std::memcpy(&out.t_us, pad + 80, sizeof out.t_us);
+        std::memcpy(out.accel, pad + 28, sizeof out.accel);
+        std::memcpy(out.gyro, pad + 40, sizeof out.gyro);
+        if (n > 0 && out.t_us <= ms[n - 1].t_us)
+            continue; /* (never backwards: the fusion's step would be negative) */
+        ++n;
+    }
+    pressed = managed_buttons(mv.mm.packet().pad);
+    return true;
+}
+
+/* A player's Move, read this poll, onto their controller: its swings scaled to
+ * what a Remote can feel, its motion through read_motion in its own slot, then
+ * its buttons on top of the player's DualSense (the Nunchuk, if they hold one). */
+void feed_move(int player, MoveRun &mv, const WiiConfig &w, const porpoise::move::Sample *ms, int n,
+               std::uint32_t pressed, std::uint64_t now)
+{
+    const bool native = mv.native;
+    for (int i = 0; i < n; ++i)
+    {
+        PadSample &p = g_samples[i];
+        std::memset(&p, 0, sizeof p);
+        p.connected = 1;
+        p.timestamp_us = ms[i].t_us;
+        p.orientation[3] = 1.0f;
+        const float *a3 = ms[i].accel;
+        if (native)
+            for (int a = 0; a < 3; ++a)
+                g_move_true_accel[i][a] = a3[a];
+        const float mag = std::sqrt(a3[0] * a3[0] + a3[1] * a3[1] + a3[2] * a3[2]);
+        if (mag > 0.85f && mag < 1.15f)
+            for (int a = 0; a < 3; ++a)
+                mv.gravity[a] += (a3[a] / mag - mv.gravity[a]) * 0.08f;
+        /* The swing (what's past gravity) into what a Wii Remote can feel: a
+         * Move reads up to 8 g a side, a Remote about 3.5. As it is (scaled by
+         * the swing strength setting) up to a knee, so light motions stay light;
+         * past it, eased toward the Remote's limit, so medium and hard swings
+         * still differ and both reach what games count as a swing (the old
+         * curve stopped short of it: tennis missed swings). */
+        /* (x 0.85, Oct 24: hits came out too hard; the knee lowered with it) */
+        const float k = std::clamp(w.swing, 20, 200) * 0.01f * 0.85f;
+        float lin[3], l2 = 0;
+        for (int a = 0; a < 3; ++a)
+        {
+            lin[a] = a3[a] - mv.gravity[a];
+            l2 += lin[a] * lin[a];
+        }
+        const float len = std::sqrt(l2);
+        constexpr float kKnee = 1.4f, kCap = 3.4f; /* g past gravity */
+        const float x = len * k;
+        float out = x;
+        if (x > kKnee)
+        {
+            /* tanh(u) as 1 - 2 / (e^2u + 1): expf is imported already, tanhf isn't. */
+            const float u = std::min((x - kKnee) / (kCap - kKnee), 20.0f);
+            out = kKnee + (kCap - kKnee) * (1.0f - 2.0f / (std::exp(2.0f * u) + 1.0f));
+        }
+        const float scale = len > 1e-4f ? out / len : k;
+        for (int a = 0; a < 3; ++a)
+        {
+            p.acceleration[a] = mv.gravity[a] + lin[a] * scale;
+            p.angular_velocity[a] = ms[i].gyro[a];
+        }
+        if (native && porpoise::debuglog::on())
+            porpoise::debuglog::move_sample(ms[i].t_us, a3, ms[i].gyro, p.acceleration, pressed);
+        p.buttons = (pressed & porpoise::move::kSquare) ? pad_r1 : 0;
+    }
+    if (n > 0)
+    {
+        if (native)
+        {
+            /* The camera's drift fix: turned in before the pointer is read. */
+            const float turn = porpoise::moveyaw::take_correction();
+            if (turn != 0)
+                aim::turn_world(mv.slot.fusion, turn);
+        }
+        mv.motion = read_motion(mv.slot, n);
+        if (native && porpoise::debuglog::on() && now >= g_yaw_report_us)
+        {
+            g_yaw_report_us = now + 5000000ull;
+            const porpoise::moveyaw::Report r = porpoise::moveyaw::report();
+            porpoise::debuglog::app("move: camera drift fix: %s, sure %.2f, %d swings, drift seen %.1f deg, %.1f deg taken out since centring%s",
+                                    r.anchored ? "on" : "learning", r.confidence, r.pairs,
+                                    r.error * 57.2958f, r.corrected * 57.2958f, r.mirrored ? " (picture mirrored)" : "");
+        }
+    }
+    State &s = g_slots[player].state;
+    s.motion = mv.motion;
+    s.connected = true;
+    std::uint32_t given = pressed & ~porpoise::move::kStart;
+    if (pressed & porpoise::move::kStart)
+    {
+        if (!mv.start_us)
+            mv.start_us = now;
+        if (!mv.start_long && now - mv.start_us >= 1000000ull)
+        {
+            mv.start_long = true;
+            ++mv.holds;
+        }
+    }
+    else if (mv.start_us)
+    {
+        if (!mv.start_long)
+            mv.start_pulse_us = now + 90000ull; /* (a few frames: games read it) */
+        mv.start_us = 0;
+        mv.start_long = false;
+    }
+    if (now < mv.start_pulse_us)
+        given |= porpoise::move::kStart;
+    porpoise::move::buttons(s, w, retro_table(w.controller), given);
+    /* Held: the in-game menu opens (as Options + touch pad does): player 1's. */
+    if (player == 0 && mv.start_long)
+        s.ps_menu_combo = true;
+    s.move = true;
+    s.move_holds = mv.holds;
+}
+
+/* The player's motors to their Move through Move Management: when they change,
+ * and again every 150 ms while one runs (each message lasts 250 ms there). */
+void managed_rumble(int player, MoveRun &mv, std::uint64_t now)
+{
+    const Slot &slot = g_slots[player];
+    const std::uint8_t large = slot.motor_large, small = slot.motor_small;
+    const bool changed = large != mv.sent_large || small != mv.sent_small;
+    if (!changed && !((large || small) && now - mv.rumble_sent_us >= 150000ull))
+        return;
+    if (mv.mm.rumble(large, small, now))
+    {
+        mv.sent_large = large;
+        mv.sent_small = small;
+        mv.rumble_sent_us = now;
+    }
+}
+
+/* A player's Navigation controller from Move Management (UDP 9980 + player), as
+ * the Nunchuk next to their Move. In Porpoise's own menus player 1's moves
+ * around like a D-pad. */
+void feed_nav(int player, MoveRun &mv, const WiiConfig &w, std::uint64_t now)
+{
+    if (!mv.nav_open)
+    {
+        if (mv.nav_tried_us && now - mv.nav_tried_us < 2000000ull)
+            return;
+        mv.nav_tried_us = now;
+        mv.nav_open = mv.nav.open(static_cast<std::uint16_t>(9980 + player));
+        porpoise::debuglog::app("nav: player %d: %s (UDP %d)", player + 1,
+                                mv.nav_open ? "listening for Move Management's Navigation controller"
+                                            : "the Navigation controller's port couldn't be opened",
+                                9980 + player);
+        if (!mv.nav_open)
+            return;
+    }
+    mv.nav.poll(now);
+    std::uint8_t drop[porpoise::move_bridge::Client::kRecent][120];
+    (void)mv.nav.take_pads(drop, porpoise::move_bridge::Client::kRecent); /* (its newest is enough) */
+    const bool here = mv.nav.fresh(now);
+    if (here != mv.nav_was)
+        porpoise::debuglog::app("nav: player %d: %s", player + 1,
+                                here ? "Navigation controller connected" : "Navigation controller gone");
+    mv.nav_was = here;
+    if (!here)
+        return;
+    PadSample nav;
+    std::memcpy(&nav, mv.nav.packet().pad, sizeof nav);
+    State &s = g_slots[player].state;
+    const std::int16_t nx = stick(nav.left_x), ny = stick(nav.left_y);
+    if (std::abs(nx) > std::abs(s.left_x))
+        s.left_x = nx;
+    if (std::abs(ny) > std::abs(s.left_y))
+        s.left_y = ny;
+    s.connected = true;
+    if (player == 0 && (!g_wii.active || g_wii.menu))
+    {
+        /* Porpoise's own menus: its buttons as the DualSense's, the stick as
+         * the D-pad. */
+        for (int control = 0; control < CtlCount; ++control)
+            if (nav.buttons & kControlPadBit[control])
+                s.buttons |= kControlButton[control];
+        if (s.left_x < -12000)
+            s.buttons |= BtnLeft;
+        if (s.left_x > 12000)
+            s.buttons |= BtnRight;
+        if (s.left_y < -12000)
+            s.buttons |= BtnUp;
+        if (s.left_y > 12000)
+            s.buttons |= BtnDown;
+    }
+    else if (w.active && w.controller == WiiRemoteNunchuk)
+    {
+        /* The Nunchuk (docs/controller-hub.md): the stick, L1 C, L2 Z; and
+         * what the Remote's D-pad, minus, plus and Home are on it. */
+        const int *retro = retro_table(w.controller);
+        auto press = [&](int input) {
+            if (retro[input] >= 0)
+                s.joypad = static_cast<std::uint16_t>(s.joypad | (1u << retro[input]));
+        };
+        if (nav.buttons & pad_l1)
+            press(WiC);
+        if ((nav.buttons & pad_l2) || nav.left_trigger > 20)
+            press(WiZ);
+        if (nav.buttons & pad_up)
+            press(WiUp);
+        if (nav.buttons & pad_down)
+            press(WiDown);
+        if (nav.buttons & pad_left)
+            press(WiLeft);
+        if (nav.buttons & pad_right)
+            press(WiRight);
+        if (nav.buttons & pad_cross)
+            press(WiMinus);
+        if (nav.buttons & pad_circle)
+            press(WiPlus);
+        if (nav.buttons & 0x10000u) /* PS */
+            press(WiHome);
+    }
 }
 } // namespace
 
@@ -1181,6 +1699,25 @@ void set_fast_forward_buttons(bool enabled)
     g_ff_buttons = enabled;
 }
 
+/* 4.5: a light tick under the finger in the menus (moving through games,
+ * dragging a menu): the small motor, briefly; poll() stops it. */
+std::uint64_t g_tick_until_us = 0;
+bool g_ticking = false;
+
+void menu_tick(std::uint8_t level, int ms)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    Slot &slot = g_slots[0];
+    if (slot.handle < 0)
+        return;
+    ScePadVibrationParam param{};
+    param.largeMotor = slot.motor_large;
+    param.smallMotor = std::max(slot.motor_small, level);
+    (void)scePadSetVibration(slot.handle, &param);
+    g_tick_until_us = monotonic_us() + std::uint64_t(std::max(5, ms)) * 1000;
+    g_ticking = true;
+}
+
 void set_rumble_enabled(bool enabled)
 {
     g_rumble_enabled.store(enabled, std::memory_order_relaxed);
@@ -1199,6 +1736,11 @@ const State &poll()
     bool scan = false;
     {
         std::lock_guard<std::recursive_mutex> lock(g_lock);
+        if (g_ticking && monotonic_us() >= g_tick_until_us)
+        {
+            g_ticking = false;
+            push_rumble(g_slots[0]); /* the tick over: the motors as they were */
+        }
         if (g_ready && ++g_polls_since_scan >= polls_per_scan)
         {
             g_polls_since_scan = 0;
@@ -1214,7 +1756,87 @@ const State &poll()
     if (scan && g_ready)
         rescan(ids);
     for (Slot &slot : g_slots)
-        slot.state = slot.handle >= 0 ? read_slot(slot) : State{};
+    {
+        slot.base = slot.handle >= 0 ? read_slot(slot) : State{};
+        slot.state = slot.base;
+    }
+    /* Each player's Move and Navigation controller (4.5 Beta 4: any player's):
+     * the Move is their Wii Remote, its motion through read_motion in its own
+     * slot, Square held as the centring button. Player 1's points in
+     * Porpoise's menus too. */
+    const std::uint64_t now = monotonic_us();
+    for (int player = 0; player < kMaxPlayers; ++player)
+    {
+        MoveRun &mv = g_mv[player];
+        const WiiConfig &w = g_wii_for[player];
+        /* Players 2 to 4's only in a Wii game, or while the Controller Hub
+         * shows them: in a GameCube game or the menus a Move of theirs would
+         * press buttons on their port. Player 1's as always. */
+        const bool want_move =
+            w.move && (player == 0 || g_wii.active || now < g_hub_until_us.load(std::memory_order_relaxed));
+        const bool want_nav = want_move && w.navigation;
+        if (want_move)
+        {
+            porpoise::move::Sample ms[sample_capacity];
+            int n = 0;
+            std::uint32_t pressed = 0;
+            /* Player 1's from the PS5 itself; else (and for players 2 to 4) Move
+             * Management's stream for this player. */
+            bool live = player == 0 && porpoise::move::take(ms, sample_capacity, n, pressed);
+            const bool native = live;
+            if (native)
+                mv.native_us = now;
+            /* (Player 1's Move Management stream only once the PS5's own Move
+             * has been gone a while: a dropout of a moment doesn't open it.) */
+            if (!live && (player != 0 || now - mv.native_us > 2000000ull))
+                live = take_managed_move(player, mv, now, ms, n, pressed);
+            else if (mv.mm_open)
+            {
+                /* The PS5 has player 1's Move: Move Management's isn't wanted. */
+                mv.mm.close();
+                mv.mm_open = mv.mm_was = false;
+                mv.sent_large = mv.sent_small = 0;
+            }
+            if (live && (!mv.live || native != mv.native) && now - mv.live_us > 2000000ull)
+            {
+                /* Back after a while (or here for the first time): its motion
+                 * starts afresh. (A dropout of a moment keeps its centre.) */
+                fresh_motion(mv.slot);
+                if (native)
+                    porpoise::moveyaw::reset();
+                mv.gravity[0] = mv.gravity[1] = 0;
+                mv.gravity[2] = 1;
+            }
+            mv.live = live;
+            mv.native = live && native;
+            if (live)
+            {
+                mv.live_us = now;
+                feed_move(player, mv, w, ms, n, pressed, now);
+                if (!native)
+                    managed_rumble(player, mv, now);
+            }
+        }
+        else
+        {
+            mv.live = mv.native = false;
+            if (mv.mm_open)
+            {
+                mv.mm.close();
+                mv.mm_open = mv.mm_was = false;
+                mv.sent_large = mv.sent_small = 0;
+                porpoise::debuglog::app("move: player %d: stopped listening to Move Management", player + 1);
+            }
+        }
+        if (want_nav)
+            feed_nav(player, mv, w, now);
+        else if (mv.nav_open)
+        {
+            mv.nav.close();
+            mv.nav_open = mv.nav_was = false;
+            porpoise::debuglog::app("nav: player %d: stopped listening", player + 1);
+        }
+    }
     return g_slots[0].state;
 }
 
@@ -1232,6 +1854,36 @@ State snapshot(int player)
 bool connected(int player)
 {
     return player >= 0 && player < kMaxPlayers && g_slots[player].handle >= 0 && g_slots[player].state.connected;
+}
+
+bool playing(int player)
+{
+    if (player < 0 || player >= kMaxPlayers)
+        return false;
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    return (g_slots[player].handle >= 0 && g_slots[player].state.connected) ||
+           (g_wii.active && g_wii_for[player].move && g_mv[player].live);
+}
+
+int move_link(int player)
+{
+    if (player < 0 || player >= kMaxPlayers)
+        return 0;
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    const MoveRun &mv = g_mv[player];
+    if (!g_wii_for[player].move)
+        return 0;
+    return !mv.live ? 1 : mv.native ? 2 : 3;
+}
+
+int nav_link(int player)
+{
+    if (player < 0 || player >= kMaxPlayers)
+        return 0;
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    if (!g_wii_for[player].move || !g_wii_for[player].navigation)
+        return 0;
+    return g_mv[player].nav_was ? 2 : 1;
 }
 
 int connected_count()
@@ -1260,15 +1912,79 @@ GbaConfig gba(int player)
     return player >= 0 && player < kMaxPlayers ? g_gba[player] : GbaConfig{};
 }
 
+WiiConfig for_player(const WiiConfig &config, int player)
+{
+    if (player <= 0 || player >= kMaxPlayers)
+        return config;
+    /* Two controllers: player 2's DualSense is player 1's Nunchuk. */
+    if (config.controller == WiiTwoControllers && player == 1)
+        return config;
+    WiiConfig c = config;
+    c.menu = false; /* (Porpoise's own screens point with player 1's) */
+    c.nunchuk_right = false;
+    const int hold = std::clamp(config.hold[player], 0, int(HoldCount) - 1);
+    if (hold == HoldDualSense)
+    {
+        const int as = config.as[player];
+        const int same = config.controller == WiiTwoControllers ? int(WiiRemoteNunchuk) : config.controller;
+        c.controller = as >= 0 && as < WiiControllerCount && as != WiiTwoControllers ? as : same;
+        c.move = false;
+        c.navigation = false;
+    }
+    else
+    {
+        /* A Move is the Remote: alone, or with the Nunchuk (a Navigation
+         * controller, or the player's DualSense). It points with its own motion. */
+        c.controller = hold == HoldMove ? WiiRemote : WiiRemoteNunchuk;
+        c.move = true;
+        c.navigation = hold == HoldMoveNav;
+        c.pointer = PointerGyro;
+        c.grip = GripAuto;
+    }
+    return c;
+}
+
 void set_wii(const WiiConfig &config)
 {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     const bool was = g_wii.active;
-    const bool turned = config.grip != g_wii.grip || config.controller != g_wii.controller;
+    WiiConfig before[kMaxPlayers];
+    for (int p = 0; p < kMaxPlayers; ++p)
+        before[p] = g_wii_for[p];
     g_wii = config;
-    if ((config.active && !was) || turned)
-        for (Slot &slot : g_slots)
+    if (g_wii.move)
+    {
+        /* The Move points with its own motion, held like a Remote. */
+        g_wii.pointer = PointerGyro;
+        g_wii.grip = GripAuto;
+    }
+    for (int p = 0; p < kMaxPlayers; ++p)
+        g_wii_for[p] = for_player(g_wii, p);
+    for (int p = 0; p < kMaxPlayers; ++p)
+    {
+        const WiiConfig &w = g_wii_for[p];
+        const bool turned = w.grip != before[p].grip || w.controller != before[p].controller || w.move != before[p].move;
+        if (!(config.active && !was) && !turned)
+            continue;
+        for (Slot *each : {&g_slots[p], &g_mv[p].slot})
         {
+            Slot &slot = *each;
+            /* A game starting held as it was centred in the setup, in the last five
+             * minutes: that centre carries into the game (REXCRAFT88's Move Studio
+             * work keeps the setup's centre). */
+            const bool recent = slot.centred_at_us && monotonic_us() - slot.centred_at_us < 300000000ull;
+            if (config.active && !was && recent && slot.kept_controller == w.controller &&
+                slot.kept_grip == w.grip && slot.kept_move == w.move)
+            {
+                slot.centre = slot.kept_centre;
+                slot.basis = slot.kept_basis;
+                slot.pose = slot.kept_pose;
+                slot.centred = true;
+                slot.pointer_x = slot.pointer_y = 0;
+                slot.smoother = {};
+                slot.centre_seq = g_centre_seq;
+                continue;
+            }
             /* A new game or a new way of holding it: find the middle again. */
             slot.pointer_x = slot.pointer_y = 0;
             slot.centred = false;
@@ -1276,6 +1992,7 @@ void set_wii(const WiiConfig &config)
             slot.fusion.age = 0.0f;
             slot.centre_seq = g_centre_seq;
         }
+    }
 }
 
 int expected_pose(const WiiConfig &config, bool second)
@@ -1355,8 +2072,11 @@ WiiLayout wii_layout(const WiiConfig &config, bool second, int pose)
          * mirror (Cross <-> down, R2 <-> L2, ...), and the player's buttons
          * were set on the right hand's: they go through the same mirror, so
          * a button moved to R1 is on L1 in the left hand. */
-        const bool mirrored = (config.controller == WiiRemote || config.controller == WiiTwoControllers) &&
-                              pose_left_hand(pose < 0 ? expected_pose(config, second) : pose);
+        const bool mirrored = ((config.controller == WiiRemote || config.controller == WiiTwoControllers) &&
+                               pose_left_hand(pose < 0 ? expected_pose(config, second) : pose)) ||
+                              config.nunchuk_right; /* (the Nunchuk's DualSense in the right hand) */
+        if (config.nunchuk_right)
+            std::swap(lay.left_stick, lay.right_stick); /* (read_slot swaps the sticks themselves) */
         for (int i = 0; i < lay.count; ++i)
         {
             const int c = lay.binds[i].control;
@@ -1428,7 +2148,11 @@ void centre_now(int player)
 {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     if (player >= 0 && player < kMaxPlayers)
+    {
         g_slots[player].centre_request = true;
+        if (g_wii_for[player].move)
+            g_mv[player].slot.centre_request = true;
+    }
 }
 
 void shift_centre(int player, float yaw, float pitch)
@@ -1436,9 +2160,11 @@ void shift_centre(int player, float yaw, float pitch)
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     if (player < 0 || player >= kMaxPlayers)
         return;
-    Slot &slot = g_slots[player];
+    Slot &slot = g_wii_for[player].move ? g_mv[player].slot : g_slots[player];
     slot.centre.yaw += yaw;
     slot.centre.pitch += pitch;
+    if (slot.centred_at_us)
+        slot.kept_centre = slot.centre; /* the five points' middle, kept for the game */
 }
 
 void set_nunchuk_motion(bool on)
@@ -1503,6 +2229,11 @@ void recenter(int player)
         g_slots[player].pointer_x = g_slots[player].pointer_y = 0;
         g_slots[player].centred = false;
     }
+    if (player >= 0 && player < kMaxPlayers && g_wii_for[player].move)
+    {
+        g_mv[player].slot.pointer_x = g_mv[player].slot.pointer_y = 0;
+        g_mv[player].slot.centred = false;
+    }
 }
 
 void set_rumble(int player, bool strong, std::uint16_t strength)
@@ -1520,5 +2251,18 @@ void set_rumble(int player, bool strong, std::uint16_t strength)
         return;
     motor = level;
     push_rumble(slot);
+    /* A Move holder's rumble is the Move's: player 1's through the PS5 (which
+     * keeps the level for whenever its Move is here), and any player's through
+     * Move Management, sent from poll (managed_rumble). */
+    if (player == 0)
+        porpoise::move::set_rumble(std::max(slot.motor_large, slot.motor_small));
+    MoveRun &mv = g_mv[player];
+    if (mv.mm_open && mv.live && !mv.native && g_wii_for[player].move)
+        managed_rumble(player, mv, monotonic_us());
+}
+
+void watching_players()
+{
+    g_hub_until_us.store(monotonic_us() + 500000ull, std::memory_order_relaxed);
 }
 } // namespace porpoise::pad

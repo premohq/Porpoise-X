@@ -23,8 +23,12 @@ bool g_vsync = true;
 /* The display's real vblank interval, timed once (enter_vblank): the mode
  * says 60 Hz on a console set to 120 Hz output. 0 until timed. */
 long long g_vblank_interval_ns = 0;
+/* The TV refreshes when a frame comes (VRR, the PS5's "Apply to Unsupported
+ * Games"): a bare refresh then takes the TV's slowest, ~20.8 ms (48 Hz),
+ * where a fixed output's is 16.7 ms (59.94 Hz) or 8.3 ms (119.88 Hz). */
+bool g_vrr = false;
 
-long long time_vblanks()
+long long time_vblanks(bool *even = nullptr)
 {
     if (!porpoise::vk::wait_vblank()) /* to the start of one */
         return 0;
@@ -45,15 +49,63 @@ long long time_vblanks()
         gap = now - last;
         last = now;
     }
-    /* The middle two of four: a late wake-up doesn't skew it. */
+    /* The middle two of four: a late wake-up doesn't skew it. even: all four
+     * within 10% of each other (no wake-up was late). */
     std::sort(gaps, gaps + 4);
-    return (gaps[1] + gaps[2]) / 2;
+    const long long middle = (gaps[1] + gaps[2]) / 2;
+    if (even)
+        *even = gaps[3] - gaps[0] <= middle / 10;
+    return middle;
 }
 } // namespace
+
+/* The TV's vblanks, timed once (the mode says 60 Hz on a console set to 120 Hz
+ * output, and nothing of VRR). */
+static void measure_once(double mode_hz)
+{
+    if (g_vblank_interval_ns == 0)
+    {
+        bool even = false;
+        long long interval = time_vblanks(&even);
+        /* VRR's long refreshes look like late wake-ups at a busy moment (the
+         * start): only an even measure counts as VRR; one that isn't is taken
+         * again. */
+        if (interval >= 17500000 && interval <= 26000000 && !even)
+            interval = time_vblanks(&even);
+        char line[128];
+        std::snprintf(line, sizeof line, "pacer: the display's vblanks come every %.3f ms (%.2f Hz; the mode says %.2f)",
+                      interval / 1e6, interval > 0 ? 1e9 / double(interval) : 0.0, mode_hz);
+        ps5::debug::mark(line);
+        /* Something between 25 and 250 Hz, or it isn't a vblank wait. */
+        g_vblank_interval_ns = interval >= 4000000 && interval <= 40000000 ? interval : -1;
+        /* The PS5 outputs 59.94 or 119.88 Hz: a bare refresh of 17.5 to 26 ms
+         * (38-57 Hz) is a TV waiting for frames, VRR's floor. */
+        g_vrr = even && interval >= 17500000 && interval <= 26000000;
+        if (g_vrr)
+            ps5::debug::mark("pacer: VRR: the TV refreshes as each frame comes");
+    }
+}
 
 void set_vsync(bool on)
 {
     g_vsync = on;
+}
+
+double measure_display()
+{
+    if (g_vsync && porpoise::vk::vblank_ready())
+        measure_once(porpoise::vk::display_hz());
+    return display_rate_hz();
+}
+
+double display_rate_hz()
+{
+    return g_vblank_interval_ns > 0 && !g_vrr ? 1e9 / double(g_vblank_interval_ns) : 0.0;
+}
+
+bool display_vrr()
+{
+    return g_vrr;
 }
 
 long long now_ns()
@@ -89,9 +141,19 @@ void Pacer::start(double content_hz, const char *who)
     frame_floor_ns_ = period_ns_ * 24 / 25;
     vblanks_per_frame_ = 1;
     /* The display can be the clock when it runs at the content's own rate
-     * (59.94 against 60 is close enough; 50 against 60 or 120 is not). */
+     * (59.94 against 60 is close enough; 50 against 60 or 120 is not). Once
+     * its vblanks were timed, by them: a whole number of them a frame (the
+     * menus at 119.88 on a 120 Hz output, two a frame for a 60 Hz game). */
     const double ratio = display / content;
     compatible_ = ratio > 0.995 && ratio < 1.012;
+    /* Frame generation under VRR: its own clock's ticks are the vblanks. */
+    const double virt_hz = porpoise::vk::virtual_vblank_hz();
+    const long long known = virt_hz > 0 ? static_cast<long long>(1e9 / virt_hz) : g_vrr ? 0 : g_vblank_interval_ns;
+    if (known > 0)
+    {
+        const int n = int(std::lround(double(period_ns_) / double(known)));
+        compatible_ = n >= 1 && n <= 4 && std::fabs(double(n * known - period_ns_)) <= 0.012 * double(period_ns_);
+    }
     mode_ = compatible_ ? Mode::Probing : Mode::Clock;
     probe_frames_ = probe_held_ = 0;
     misses_ = 0;
@@ -111,19 +173,28 @@ void Pacer::start(double content_hz, const char *who)
 
 void Pacer::enter_vblank()
 {
-    if (g_vblank_interval_ns == 0)
+    measure_once(1e9 / double(vblank_ns_));
+    const double virt_hz = porpoise::vk::virtual_vblank_hz();
+    if (g_vrr && virt_hz <= 0)
     {
-        const long long interval = time_vblanks();
+        /* VRR: each frame is presented on Porpoise's own clock at the game's
+         * rate and the TV shows it then, so a 50 Hz game is shown at 50 and a
+         * frame that runs late is shown when it's ready, without a judder.
+         * Waiting on the vblank would hold frames to the TV's slowest rate. */
+        const bool was_clock = mode_ == Mode::Clock;
+        mode_ = Mode::Clock;
+        vblank_failures_ = 1000;
+        clock_since_ns_ = now_ns();
+        if (!was_clock)
+            deadline_ns_ = last_ns_ = clock_since_ns_;
         char line[128];
-        std::snprintf(line, sizeof line, "pacer: the display's vblanks come every %.3f ms (%.2f Hz; the mode says %.2f)",
-                      interval / 1e6, interval > 0 ? 1e9 / double(interval) : 0.0, 1e9 / double(vblank_ns_));
+        std::snprintf(line, sizeof line, "pacer: %s: VRR, own clock at %.3f ms a frame", who_, period_ns_ / 1e6);
         ps5::debug::mark(line);
-        /* Something between 25 and 250 Hz, or it isn't a vblank wait. */
-        g_vblank_interval_ns = interval >= 4000000 && interval <= 40000000 ? interval : -1;
+        return;
     }
     /* How many vblanks make one of the content's frames: one at 60 Hz, two at
      * 120. One that doesn't divide it within 1.2% (144 Hz) gets the own clock. */
-    const long long interval = g_vblank_interval_ns;
+    const long long interval = virt_hz > 0 ? static_cast<long long>(1e9 / virt_hz) : g_vblank_interval_ns;
     const int n = interval > 0 ? int(std::lround(double(period_ns_) / double(interval))) : 0;
     if (n < 1 || n > 4 || std::fabs(double(n * interval - period_ns_)) > 0.012 * double(period_ns_))
     {
@@ -294,7 +365,7 @@ void Pacer::frame_done()
             return;
         /* Still the own clock: this frame is paced by it below. */
     }
-    if (g_vsync && mode_ == Mode::Clock && compatible_ && now_ns() - clock_since_ns_ > kReprobeNs)
+    if (g_vsync && mode_ == Mode::Clock && compatible_ && !g_vrr && now_ns() - clock_since_ns_ > kReprobeNs)
     {
         /* A slow stretch (loading, a heavy scene) can make the probe miss a
          * display that does hold the loop: try again now and then. */

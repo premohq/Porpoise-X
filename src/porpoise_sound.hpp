@@ -17,12 +17,16 @@ enum class Effect
     MovingTab,   /* Library / Memory Cards / Settings */
     DetailsFlip, /* into and out of a game's details, the in-game menu */
     LaunchGame,  /* Play */
+    BootSonar,   /* the boot (ui_app_boot.cpp): its hum and pings, for Soundscape */
+    BootSonarLegacy, /* ...for Porpoise's original music */
     Count,
 };
 
 /* Loads <assets>/sounds/: the effects (48 kHz stereo WAV) and the music (Ogg). */
 bool load(const std::string &asset_dir);
 void play(Effect e);
+/* Stops an effect playing, with a short fade (the boot's hum, skipped). */
+void stop(Effect e);
 /* An effect's sound in place of its own (48 kHz interleaved stereo); a sound
  * set (porpoise_sfx). */
 void set_effect(Effect e, const std::vector<std::int16_t> &frames);
@@ -33,6 +37,8 @@ void use_own_effects();
 void play_jingle(const std::int16_t *frames, std::size_t count);
 /* volume 0..1 */
 void set_music(bool on, float volume);
+/* Which loop: 0 Porpoise's original (the legacy looks), 1 Soundscape (the new look). */
+void set_music_track(int track);
 void set_effects(bool on, float volume);
 /* Fades the music toward 0..1 over seconds (out before a game, in after). */
 void fade_music(float to, float seconds);

@@ -259,7 +259,7 @@ def porpoise():
     img.alpha_composite(floor.filter(ImageFilter.GaussianBlur(0.6)))
     img.alpha_composite(glow(floor.getchannel("A"), 6, (90, 200, 255), 0.6))
     # The dolphin, large on the left, with its glow.
-    logo = Image.open(os.path.join(ROOT, "assets", "brand", "dolphin-color.png")).convert("RGBA")
+    logo = Image.open(os.path.join(ROOT, "tools", "brand", "dolphin-color.png")).convert("RGBA")
     size = 196
     logo = logo.resize((size, size), Image.LANCZOS)
     lx, ly = (PX0 - size) // 2, 170

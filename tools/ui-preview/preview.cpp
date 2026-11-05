@@ -5,6 +5,7 @@
  */
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -410,6 +411,991 @@ int main(int argc, char **argv)
     };
     const std::uint32_t kDown = 1u << 1, kRight = 1u << 3, kCross = 1u << 4, kCircle = 1u << 5,
                         kSquare = 1u << 6, kTriangle = 1u << 7, kR1 = 1u << 9;
+
+    /* PV_ISLAND=1: the island open, a shortcut picked, in each look. */
+    if (getenv("PV_ISLAND"))
+    {
+        struct L
+        {
+            const char *name;
+            int theme, mode;
+        } looks[] = {{"glass-dark", int(porpoise::ui::ThemeId::Glass), 0},
+                     {"glass-light", int(porpoise::ui::ThemeId::Glass), 2},
+                     {"legacy", int(porpoise::ui::ThemeId::Porpoise), 0},
+                     {"revolution", int(porpoise::ui::ThemeId::Revolution), 0},
+                     {"starcube", int(porpoise::ui::ThemeId::StarCube), 0}};
+        for (const L &l : looks)
+        {
+            settings.ui_theme = l.theme;
+            settings.ui_mode = l.mode;
+            ui.restart_fresh();
+            settle();
+            if (l.theme == int(porpoise::ui::ThemeId::StarCube))
+            {
+                ui.preview_starcube(0, true);
+                settle();
+            }
+            ui.preview_glass(false, 0, true);
+            ui.preview_island_pick(1);
+            settle();
+            ui.preview_island_pick(1);
+            render(("island-" + std::string(l.name)).c_str(), [&] { ui.draw(12.0); });
+        }
+        return 0;
+    }
+
+    /* PV_MENUCTL=<theme>: the in-game menu's Controls tab in a Wii game (and
+     * with the Move), and the hub over the game. */
+    if (const char *mc = getenv("PV_MENUCTL"))
+    {
+        porpoise::ui::Game &g0 = lib.games()[0];
+        g0.platform = "Wii";
+        settings.ui_theme = atoi(mc);
+        settings.wii_move = getenv("PV_MENUCTL_MOVE") != nullptr;
+        settings.wii_controller = getenv("PV_MENUCTL_CTL") ? atoi(getenv("PV_MENUCTL_CTL")) : 0;
+        ui.preview_look_changed();
+        settle();
+        static porpoise::Settings play;
+        play = settings;
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        auto shot = [&](const std::string &name) {
+            render(name.c_str(), [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+        };
+        ui.open_game_menu(&g0, &play);
+        for (int i = 0; i < 30; ++i)
+            ui.update_game_menu(none, 0.016);
+        for (int i = 0; i < 4; ++i)
+        {
+            Input r1;
+            r1.held = kR1;
+            ui.update_game_menu(r1, 0.016);
+            ui.update_game_menu(none, 0.016);
+        }
+        for (int i = 0; i < 30; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("menuctl-controls");
+        ui.preview_ingame_hub(false);
+        for (int i = 0; i < 40; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("menuctl-hub");
+        return 0;
+    }
+
+    /* PV_MOVEPTR=1: the Move's pointer over the library, a game's page and the
+     * in-game menu (Porpoise look and Legacy), T pulled on what it points at. */
+    if (getenv("PV_MOVEPTR"))
+    {
+        porpoise::ui::Game &g0 = lib.games()[0];
+        static porpoise::Settings play;
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        for (int theme : {int(porpoise::ui::ThemeId::Glass), int(porpoise::ui::ThemeId::Porpoise)})
+        {
+            settings.ui_theme = theme;
+            settings.ui_mode = 0;
+            ui.restart_fresh();
+            settle();
+            const std::string tn = theme == int(porpoise::ui::ThemeId::Glass) ? "glass" : "legacy";
+            if (theme == int(porpoise::ui::ThemeId::Glass))
+            {
+                ui.preview_move_pointer(1240, 470, true);
+                settle();
+                render(("mp-" + tn + "-library").c_str(), [&] { ui.draw(12.0); });
+                /* T on the case to the right: it comes to the front; again: its page. */
+                Input t;
+                t.held = 1u << 11; /* R2 */
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    render("mp-scratch", [&] { ui.draw(12.0); }); /* (where things are: the pointer's) */
+                    ui.update(t, 0.016);
+                    ui.update(none, 0.016);
+                    ui.preview_move_pointer(960, 470, true);
+                    settle();
+                }
+                render(("mp-" + tn + "-details").c_str(), [&] { ui.draw(12.0); });
+                ui.preview_move_pointer(-1, -1, false);
+            }
+            play = settings;
+            ui.open_game_menu(&g0, &play);
+            ui.preview_move_pointer(1500, 330, false);
+            for (int i = 0; i < 30; ++i)
+                ui.update_game_menu(none, 0.016);
+            render("mp-scratch", [&] { ui.draw_game_menu(12.0); });
+            ui.update_game_menu(none, 0.016);
+            render(("mp-" + tn + "-menu").c_str(), [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+            ui.preview_move_pointer(-1, -1, false);
+        }
+        return 0;
+    }
+
+    /* PV_DIALOG=<theme>: a confirm dialog over Settings, and over the library. */
+    if (const char *dl = getenv("PV_DIALOG"))
+    {
+        const std::uint32_t kR1b = 1u << 9;
+        settings.ui_theme = atoi(dl);
+        settings.ui_mode = getenv("PV_DIALOG_MODE") ? atoi(getenv("PV_DIALOG_MODE")) : 0;
+        ui.restart_fresh();
+        settle();
+        ui.preview_dialog(true);
+        settle();
+        render("dialog-main", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        press(kR1b, 2);
+        settle();
+        ui.preview_dialog(true);
+        settle();
+        render("dialog-settings", [&] { ui.draw(12.0); });
+        return 0;
+    }
+
+    /* PV_BOOT=1: the boot (Sonar) in each look and over the welcome, a few moments. */
+    if (getenv("PV_BOOT"))
+    {
+        struct Look
+        {
+            const char *name;
+            int theme, mode;
+            bool welcome;
+        } looks[] = {{"glass-dark", int(porpoise::ui::ThemeId::Glass), 0, false},
+                     {"glass-light", int(porpoise::ui::ThemeId::Glass), 2, false},
+                     {"revolution", int(porpoise::ui::ThemeId::Revolution), 0, false},
+                     {"starcube", int(porpoise::ui::ThemeId::StarCube), 0, false},
+                     {"legacy", int(porpoise::ui::ThemeId::Porpoise), 0, false},
+                     {"welcome", int(porpoise::ui::ThemeId::Glass), 0, true}};
+        const char *only = getenv("PV_BOOT");
+        const double times[] = {0.0, 0.5, 0.8, 1.3, 1.9, 2.8, 3.6, 3.75, 4.2, 4.8, 5.3, 5.62, 6.0};
+        for (const Look &l : looks)
+        {
+            if (*only && strcmp(only, "1") && !strstr(l.name, only))
+                continue;
+            settings.ui_theme = l.theme;
+            settings.ui_mode = l.mode;
+            ui.restart_fresh();
+            if (l.welcome)
+                ui.start_welcome();
+            settle();
+            settle();
+            ui.start_boot(l.theme == int(porpoise::ui::ThemeId::Porpoise));
+            for (double t : times)
+            {
+                ui.preview_boot_time(t);
+                ui.boot_frame(none, true);
+                ui.update(none, 0.016);
+                char name[64];
+                std::snprintf(name, sizeof name, "boot-%s-%.2f", l.name, t);
+                render(name, [&] {
+                    ui.draw(12.0);
+                    const std::size_t menus = gfx.quads();
+                    ui.draw_boot();
+                    std::fprintf(stderr, "%s: quads %zu (menus %zu)%s\n", name, gfx.quads(), menus,
+                                 gfx.overflowed() ? " OVERFLOW" : "");
+                });
+            }
+        }
+        return 0;
+    }
+
+    /* PV_HOMES=1: each look's home screen, as it first appears (boot concepts). */
+    if (getenv("PV_HOMES"))
+    {
+        struct Home
+        {
+            const char *name;
+            int theme, mode;
+        } homes[] = {{"glass-light", int(porpoise::ui::ThemeId::Glass), 2},
+                     {"glass-dark", int(porpoise::ui::ThemeId::Glass), 0},
+                     {"glass-oled", int(porpoise::ui::ThemeId::Glass), 1},
+                     {"revolution", int(porpoise::ui::ThemeId::Revolution), 0},
+                     {"starcube", int(porpoise::ui::ThemeId::StarCube), 0},
+                     {"legacy", int(porpoise::ui::ThemeId::Porpoise), 0}};
+        for (const Home &h : homes)
+        {
+            settings.ui_theme = h.theme;
+            settings.ui_mode = h.mode;
+            ui.restart_fresh();
+            settle();
+            settle();
+            settle();
+            render(("home-" + std::string(h.name)).c_str(), [&] { ui.draw(12.0); });
+        }
+        return 0;
+    }
+
+    /* PV_INGAME_HUB=<theme>: the Controller Hub over a game, from the in-game
+     * menu, pushed around at random (a freeze hunt). */
+    if (const char *ih = getenv("PV_INGAME_HUB"))
+    {
+        porpoise::ui::Game &g0 = lib.games()[0];
+        g0.platform = "Wii";
+        settings.ui_theme = atoi(ih);
+        settings.wii_move = getenv("PV_INGAME_DS") == nullptr;
+        ui.preview_look_changed();
+        settle();
+        static porpoise::Settings play;
+        play = settings;
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        auto shot = [&](const std::string &name) {
+            render(name.c_str(), [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+        };
+        unsigned seed = 12345;
+        const std::uint32_t bits[] = {1u << 0, 1u << 1, 1u << 2, 1u << 3, kCross, kCircle, kSquare, kTriangle, 1u << 8, kR1};
+        for (int round = 0; round < (getenv("PV_ROUNDS") ? atoi(getenv("PV_ROUNDS")) : 6); ++round)
+        {
+            ui.open_game_menu(&g0, &play);
+            for (int i = 0; i < 30; ++i)
+                ui.update_game_menu(none, 0.016);
+            ui.preview_ingame_hub(round % 3 == 2);
+            for (int i = 0; i < 20; ++i)
+                ui.update_game_menu(none, 0.016);
+            shot("ih-" + std::to_string(round) + "-open");
+            for (int step = 0; step < 400; ++step)
+            {
+                seed = seed * 1103515245u + 12345u;
+                Input in;
+                in.held = bits[(seed >> 16) % 10];
+                if (in.held == kCircle && ((seed >> 8) & 3))
+                    in.held = 1u << 1; /* not out too often */
+                ui.update_game_menu(in, 0.016);
+                ui.update_game_menu(none, 0.016);
+                if (step % 50 == 0)
+                {
+                    shot("ih-" + std::to_string(round) + "-" + std::to_string(step));
+                    std::fprintf(stderr, "round %d step %d hub %d\n", round, step, ui.preview_ingame_hub_open() ? 1 : 0);
+                }
+                if (!ui.preview_ingame_hub_open())
+                    ui.preview_ingame_hub(false);
+            }
+        }
+        std::fprintf(stderr, "in-game hub: done\n");
+        return 0;
+    }
+
+    /* PV_THEMES=1: 4.5 in the other themes: the island, the side menu, a
+     * game's page closing, the in-game menu. */
+    if (getenv("PV_THEMES"))
+    {
+        porpoise::ui::Game &g0 = lib.games()[0];
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        const int themes[3] = {int(porpoise::ui::ThemeId::Porpoise), int(porpoise::ui::ThemeId::Revolution),
+                               int(porpoise::ui::ThemeId::StarCube)};
+        const char *names[3] = {"legacy", "rev", "sc"};
+        for (int t = 0; t < 3; ++t)
+        {
+            settings.ui_theme = themes[t];
+            ui.restart_fresh();
+            settle();
+            const std::string n = names[t];
+            if (t == 2)
+            {
+                ui.preview_starcube(0, true);
+                settle();
+                settle();
+            }
+            ui.preview_glass(false, 0, true);
+            settle();
+            render(("th-" + n + "-island").c_str(), [&] { ui.draw(12.0); });
+            ui.preview_glass(false, 0, false);
+            settle();
+            press(kTriangle);
+            settle();
+            render(("th-" + n + "-menu").c_str(), [&] { ui.draw(12.0); });
+            press(kCircle);
+            settle();
+            if (t != 1)
+            {
+                press(kSquare);
+                settle();
+                settle();
+                press(kCircle);
+                for (int i = 0; i < 9; ++i)
+                    ui.update(none, 0.016);
+                render(("th-" + n + "-back").c_str(), [&] { ui.draw(12.0); });
+                settle();
+            }
+            static porpoise::Settings play;
+            play = settings;
+            ui.open_game_menu(&g0, &play);
+            for (int i = 0; i < 40; ++i)
+                ui.update_game_menu(none, 0.016);
+            render(("th-" + n + "-ingame").c_str(), [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+            settle();
+        }
+        return 0;
+    }
+
+    /* PV_SET=1: 4.5's settings: the side menu's Full Settings, the tabs and
+     * their parts, About's credits, a game's settings, and 4.5's welcome. */
+    if (getenv("PV_SET"))
+    {
+        const std::uint32_t kUp = 1u << 0;
+        settings.ui_theme = int(porpoise::ui::ThemeId::Glass);
+        settings.ui_mode = 2;
+        settle();
+        render("set-flow-light", [&] { ui.draw(12.0); });
+        press(kR1);
+        settle();
+        render("set-flow-light-gc", [&] { ui.draw(12.0); });
+        press(1u << 8); /* L1: back to All */
+        settle();
+        {
+            ui.begin_launch(&lib.games()[2]);
+            ui.preview_launch_start(10.0);
+            render("set-launch-light", [&] { ui.draw_launch(12.4); });
+            Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+            static porpoise::Settings play;
+            play = settings;
+            ui.open_game_menu(&lib.games()[0], &play);
+            for (int i = 0; i < 40; ++i)
+                ui.update_game_menu(none, 0.016);
+            render("set-ingame-light", [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+            ui.return_from_game();
+            settle();
+        }
+        settings.ui_mode = 0;
+        settle();
+        render("set-flow-dark", [&] { ui.draw(12.0); });
+        /* The island opening and closing: its rows fading in and out at its edge. */
+        ui.preview_glass(false, 0, true);
+        for (int f = 0; f < 3; ++f)
+        {
+            for (int i = 0; i < 4; ++i)
+                ui.update(none, 0.016);
+            render(("set-island-open-" + std::to_string(f)).c_str(), [&] { ui.draw(12.0); });
+        }
+        settle();
+        ui.preview_glass(false, 0, false);
+        for (int i = 0; i < 5; ++i)
+            ui.update(none, 0.016);
+        render("set-island-close", [&] { ui.draw(12.0); });
+        settle();
+        /* Details, then back into the row. */
+        press(kSquare);
+        settle();
+        settle();
+        render("set-details", [&] { ui.draw(12.0); });
+        press(kCircle);
+        for (int f = 0; f < 3; ++f)
+        {
+            for (int i = 0; i < 6; ++i)
+                ui.update(none, 0.016);
+            render(("set-back-" + std::to_string(f)).c_str(), [&] { ui.draw(12.0); });
+        }
+        settle();
+        press(kTriangle);
+        settle();
+        press(kDown, 30);
+        settle();
+        render("set-menu-bottom", [&] { ui.draw(12.0); });
+        press(kCross);
+        settle();
+        settle();
+        render("set-rail", [&] { ui.draw(12.0); });
+        press(kCross);
+        settle();
+        render("set-games", [&] { ui.draw(12.0); });
+        press(kDown, 9);
+        settle();
+        render("set-games-down", [&] { ui.draw(12.0); });
+        press(kCircle);
+        press(kDown);
+        press(kCross);
+        settle();
+        render("set-video", [&] { ui.draw(12.0); });
+        press(kDown, 14);
+        settle();
+        render("set-video-deep", [&] { ui.draw(12.0); });
+        press(kCircle);
+        press(kDown, 7);
+        press(kCross);
+        settle();
+        render("set-about", [&] { ui.draw(12.0); });
+        press(kDown, 7);
+        press(kCross);
+        settle();
+        render("set-credits", [&] { ui.draw(12.0); });
+        press(kCircle);
+        press(kUp, 3);
+        press(kCross);
+        settle();
+        render("set-controls", [&] { ui.draw(12.0); });
+        ui.preview_game_settings(0);
+        settle();
+        render("set-game-rail", [&] { ui.draw(12.0); });
+        press(kDown, 4);
+        press(kCross);
+        settle();
+        render("set-game-video", [&] { ui.draw(12.0); });
+        press(kDown, 10);
+        settle();
+        render("set-game-video-deep", [&] { ui.draw(12.0); });
+        settings.ui_mode = 2;
+        ui.start_welcome(true);
+        settle();
+        settle();
+        render("set-welcome-light", [&] { ui.draw(12.0); });
+        settings.ui_mode = 0;
+        settle();
+        render("set-welcome", [&] { ui.draw(12.0); });
+        press(kDown);
+        settle();
+        render("set-welcome-legacy", [&] { ui.draw(12.0); });
+        return 0;
+    }
+
+    /* PV_GLASS=1: the Porpoise look (4.1): the flow in its three modes, the
+     * filters, rows, a game's page, the menu growing into Settings, Memory
+     * Cards, the island; then Classic's island; then stop. */
+    if (getenv("PV_GLASS"))
+    {
+        const std::uint32_t kL1 = 1u << 8, kUp = 1u << 0, kLeft = 1u << 2;
+        settings.ui_theme = int(porpoise::ui::ThemeId::Glass);
+        settings.glass_layout = 0;
+        lib.games()[2].favourite = true;
+        lib.games()[2].play_seconds = 6 * 3600 + 40 * 60;
+        lib.games()[2].last_played = (long long)std::time(nullptr) - 2 * 86400;
+        for (int mode : {0, 1, 2})
+        {
+            settings.ui_mode = mode;
+            settle();
+            settle();
+            render(("gl-flow-" + std::to_string(mode)).c_str(), [&] { ui.draw(12.0); });
+        }
+        settings.ui_mode = 0;
+        press(kR1);
+        settle();
+        render("gl-filter-gc", [&] { ui.draw(12.0); });
+        press(kL1);
+        settle();
+        settings.glass_layout = 1;
+        press(kRight);
+        settle();
+        render("gl-rows", [&] { ui.draw(12.0); });
+        settings.ui_mode = 2;
+        settle();
+        render("gl-rows-light", [&] { ui.draw(12.0); });
+        settings.ui_mode = 0;
+        settings.glass_layout = 0;
+        settle();
+        press(kSquare);
+        for (int i = 0; i < 12; ++i)
+            ui.update(none, 0.016);
+        render("gl-details-in", [&] { ui.draw(12.0); });
+        settle();
+        settle();
+        render("gl-details", [&] { ui.draw(12.0); });
+        press(kRight);
+        settle();
+        render("gl-details-states", [&] { ui.draw(12.0); });
+        press(kCross);
+        settle();
+        render("gl-states", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        press(kCross);
+        settle();
+        render("gl-states", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        press(kLeft);
+        press(kCircle);
+        settle();
+        press(kTriangle);
+        settle();
+        render("gl-menu", [&] { ui.draw(12.0); });
+        press(kDown, 6);
+        settle();
+        render("gl-menu-down", [&] { ui.draw(12.0); });
+        press(kCross);
+        for (int i = 0; i < 8; ++i)
+            ui.update(none, 0.016);
+        render("gl-grow", [&] { ui.draw(12.0); });
+        settle();
+        render("gl-settings", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        render("gl-settings-rail", [&] { ui.draw(12.0); });
+        press(kCircle);
+        for (int i = 0; i < 8; ++i)
+            ui.update(none, 0.016);
+        render("gl-shrink", [&] { ui.draw(12.0); });
+        settle();
+        render("gl-menu-back", [&] { ui.draw(12.0); });
+        press(kUp, 12);
+        press(kDown, 2); /* Memory Cards */
+        press(kCross);
+        settle();
+        settle();
+        render("gl-cards", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        press(kCircle);
+        settle();
+        ui.preview_glass(false, 0, true);
+        settle();
+        render("gl-island", [&] { ui.draw(12.0); });
+        settings.ui_mode = 2;
+        settle();
+        render("gl-island-light", [&] { ui.draw(12.0); });
+        settings.ui_mode = 1;
+        ui.preview_glass(false, 0, false);
+        ui.preview_ctl_toasts();
+        for (int i = 0; i < 30; ++i)
+            ui.update(none, 0.016);
+        render("gl-news", [&] { ui.draw(12.0); });
+        settings.ui_mode = 0;
+        settings.ui_theme = 0;
+        settle();
+        render("classic", [&] { ui.draw(12.0); });
+        ui.preview_glass(false, 0, true);
+        settle();
+        render("classic-island", [&] { ui.draw(12.0); });
+        return 0;
+    }
+
+    /* PV_GLASS2=1: the Porpoise look's other screens: a game's achievements
+     * list, the Apply question, the Online Hub, the launch screen and the
+     * in-game menu; then stop. */
+    if (getenv("PV_GLASS2"))
+    {
+        settings.ui_theme = int(porpoise::ui::ThemeId::Glass);
+        settings.ui_mode = 0;
+        static porpoise::ui::AchievementSet fake;
+        fake.game_id = 11;
+        fake.title = "Garden Critters";
+        mkdir((out + "/achievements").c_str(), 0777);
+        mkdir((out + "/achievements/badges").c_str(), 0777);
+        const char *titles[] = {"First Steps", "Bug Collector", "Night Owl", "Speed Runner", "Perfectionist",
+                                "Secret Garden", "Rainy Day", "Full House", "Long Haul", "Last Bloom"};
+        for (int i = 0; i < 10; ++i)
+        {
+            porpoise::ui::Achievement a;
+            a.id = unsigned(100 + i);
+            a.points = (i % 4 + 1) * 5;
+            a.unlocked = i < 4;
+            a.unlock_time = a.unlocked ? (long long)std::time(nullptr) - (i + 1) * 86400 : 0;
+            a.title = titles[i];
+            a.description = "Something to do in the game to get this one.";
+            a.badge_url = "https://media.retroachievements.org/Badge/" + std::to_string(5000 + i) + ".png";
+            fake.list.push_back(a);
+            const std::string from = covers + "/PRVW0" + std::to_string(1 + i % 8) + ".png";
+            std::system(("cp '" + from + "' '" + out + "/achievements/badges/" + porpoise::ui::badge_file(a.badge_url) +
+                         "'").c_str());
+        }
+        fake.total = 10;
+        fake.unlocked = 4;
+        fake.points_total = 125;
+        fake.points = 50;
+        ui.set_achievement_source([](const std::string &, bool) { return fake; });
+        settle();
+        /* Play: the library parts and the case flips into the launch screen. */
+        {
+            porpoise::ui::Game *sel = nullptr;
+            for (auto &gm : lib.games())
+                if (gm.cover && !sel)
+                    sel = &gm;
+            render("gl2-play-0", [&] { ui.draw(12.0); });
+            bool begun = false;
+            for (double at : {0.15, 0.35, 0.55, 0.75})
+            {
+                char name[32];
+                std::snprintf(name, sizeof name, "gl2-play-%03d", int(at * 1000));
+                render(name, [&] {
+                    if (!begun)
+                    {
+                        begun = true;
+                        ui.begin_launch(sel ? sel : &lib.games()[0]);
+                        ui.preview_launch_start(12.0);
+                    }
+                    if (ui.launch_intro(12.0 + at) < 1.0f)
+                        ui.draw(12.0 + at);
+                    ui.draw_launch(12.0 + at);
+                });
+            }
+            ui.return_from_game();
+            settle();
+        }
+        auto frames = [&](int n) {
+            /* Drawn each frame too, as on the console (what glides keeps going). */
+            for (int i = 0; i < n; ++i)
+            {
+                gfx.begin(0, float(W), float(H), 12.0f, 0.0f, false);
+                ui.draw(12.0);
+                ui.update(none, 0.016);
+            }
+        };
+        if (getenv("PV_MOTION"))
+        {
+            /* Motion, caught partway: the menu coming in, a filter changing, a
+             * game's achievements sliding up, Game Settings growing. */
+            frames(3);
+            {
+                Input in;
+                in.held = kTriangle;
+                ui.update(in, 0.016);
+            }
+            for (int f : {4, 4, 6})
+            {
+                frames(f);
+                static int k = 0;
+                render(("mo-menu-" + std::to_string(++k)).c_str(), [&] { ui.draw(12.0); });
+            }
+            /* The menu grows into Settings (Video). */
+            press(kDown, 6);
+            frames(20);
+            {
+                Input in;
+                in.held = kCross;
+                ui.update(in, 0.016);
+            }
+            for (int f : getenv("PV_EVERY") ? std::vector<int>(26, 1) : std::vector<int>{3, 4, 5, 8})
+            {
+                frames(f);
+                static int k = 0;
+                render(("mo-grow-" + std::to_string(++k)).c_str(), [&] { ui.draw(12.0); });
+            }
+            press(kCircle);
+            press(kCircle);
+            settle();
+            press(kCircle);
+            settle();
+            frames(3);
+            {
+                Input in;
+                in.held = kR1;
+                ui.update(in, 0.016);
+            }
+            for (int f : {4, 5, 5, 8})
+            {
+                frames(f);
+                static int k = 0;
+                render(("mo-filter-" + std::to_string(++k)).c_str(), [&] { ui.draw(12.0); });
+            }
+            settle();
+        }
+        press(kSquare); /* Details */
+        settle();
+        render("gl2-details-ach", [&] { ui.draw(12.0); });
+        if (getenv("PV_MOTION"))
+        {
+            frames(3);
+            {
+                Input in;
+                in.held = 1u << 1;
+                ui.update(in, 0.016);
+            }
+            for (int f : {4, 5, 8})
+            {
+                frames(f);
+                static int k = 0;
+                render(("mo-ach-" + std::to_string(++k)).c_str(), [&] { ui.draw(12.0); });
+            }
+            press(kCircle);
+            settle();
+            press(kRight, 2); /* Game Settings */
+            frames(3);
+            {
+                Input in;
+                in.held = kCross;
+                ui.update(in, 0.016);
+            }
+            for (int f : getenv("PV_EVERY") ? std::vector<int>(26, 1) : std::vector<int>{4, 5, 6, 10})
+            {
+                frames(f);
+                static int k = 0;
+                render(("mo-gs-" + std::to_string(++k)).c_str(), [&] { ui.draw(12.0); });
+            }
+            return 0;
+        }
+        press(kDown);
+        settle();
+        press(kDown, 2);
+        settle();
+        render("gl2-ach-list", [&] { ui.draw(12.0); });
+        press(kCircle);
+        press(kCircle);
+        settle();
+        /* Settings with a change, then leaving: the Apply question. */
+        press(kTriangle);
+        settle();
+        press(1u << 1, 7); /* down to Enhancements */
+        press(kCross);
+        settle();
+        press(kRight);
+        settle();
+        press(kCircle);
+        press(kCircle);
+        settle();
+        render("gl2-apply", [&] { ui.draw(12.0); });
+        press(kCircle);
+        settle();
+        ui.preview_hub(0, false, 0, 0, "", {});
+        settle();
+        render("gl2-hub", [&] { ui.draw(12.0); });
+        ui.begin_launch(&lib.games()[3]);
+        ui.preview_launch_start(10.0);
+        render("gl2-launch", [&] { ui.draw_launch(12.4); });
+        porpoise::ui::Game &g0 = lib.games()[0];
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        porpoise::Settings play = settings;
+        ui.open_game_menu(&g0, &play);
+        for (int i = 0; i < 40; ++i)
+            ui.update_game_menu(none, 0.016);
+        render("gl2-ingame", [&] {
+            gfx.background();
+            if (frame)
+                gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+            ui.draw_game_menu(12.0);
+        });
+        return 0;
+    }
+
+    /* PV_FUZZ=<theme>: Settings in that look, every row changed one way and back,
+     * then Cross on each (a crash hunt), rendering every 10th row. */
+    if (const char *fz = getenv("PV_FUZZ"))
+    {
+        const std::uint32_t kUp = 1u << 0, kLeft = 1u << 2, kR1b = 1u << 9;
+        settings.ui_theme = atoi(fz);
+        ui.preview_look_changed();
+        settle();
+        press(kR1b, 2);
+        settle();
+        render("fuzz-settings", [&] { ui.draw(12.0); });
+        const bool cross = getenv("PV_FUZZ_CROSS") != nullptr;
+        const int section = getenv("PV_FUZZ_SECTION") ? atoi(getenv("PV_FUZZ_SECTION")) : 3;
+        press(kDown, section);
+        press(kRight); /* into the section */
+        settle();
+        for (int i = 0; i < 60; ++i)
+        {
+            if (i > 0)
+                press(kDown);
+            if (!cross)
+            {
+                press(kRight);
+                press(kLeft);
+            }
+            if (cross)
+            {
+                press(kCross);
+                for (int k = 0; k < 10; ++k)
+                    ui.update(none, 0.016);
+                render(("fuzz-" + std::to_string(i)).c_str(), [&] { ui.draw(12.0); });
+                press(kCircle);
+                for (int k = 0; k < 10; ++k)
+                    ui.update(none, 0.016);
+            }
+            else
+                render(("fuzz-" + std::to_string(i)).c_str(), [&] { ui.draw(12.0); });
+            std::fprintf(stderr, "fuzz row %d\n", i);
+        }
+        (void)kUp;
+        return 0;
+    }
+
+    /* PV_GUIDE=<theme>: How to Hold It in that look, every controller. */
+    if (const char *gd = getenv("PV_GUIDE"))
+    {
+        settings.ui_theme = atoi(gd);
+        ui.preview_look_changed();
+        settle();
+        ui.preview_wii_guide();
+        for (int c = 0; c < 7; ++c)
+        {
+            for (int k = 0; k < 20; ++k)
+                ui.update(none, 0.016);
+            render(("guide-" + std::to_string(c)).c_str(), [&] { ui.draw(12.0); });
+            press(kRight);
+        }
+        return 0;
+    }
+
+    /* PV_BRAND=1: the top left in each look and mode (the wordmark), then stop. */
+    if (getenv("PV_BRAND"))
+    {
+        struct Look
+        {
+            const char *name;
+            int theme, mode;
+        } looks[] = {{"brand-new-light", int(porpoise::ui::ThemeId::Glass), 2},
+                     {"brand-new-dark", int(porpoise::ui::ThemeId::Glass), 0},
+                     {"brand-new-oled", int(porpoise::ui::ThemeId::Glass), 1},
+                     {"brand-classic", 0, 0},
+                     {"brand-revolution", int(porpoise::ui::ThemeId::Revolution), 0},
+                     {"brand-starcube", int(porpoise::ui::ThemeId::StarCube), 0}};
+        for (const Look &l : looks)
+        {
+            settings.ui_theme = l.theme;
+            settings.ui_mode = l.mode;
+            ui.preview_look_changed();
+            settle();
+            render(l.name, [&] { ui.draw(12.0); });
+        }
+        return 0;
+    }
+
+    /* PV_CTL=1: the Controllers pages, the notices and the badges, then stop. */
+    if (getenv("PV_CTL"))
+    {
+        if (getenv("PV_CTL_GLASS"))
+            settings.ui_theme = int(porpoise::ui::ThemeId::Glass);
+        settings.wii_move = true;
+        settings.wii_presets[0].used = true;
+        settings.wii_presets[0].name = 0;
+        struct Shot
+        {
+            const char *name;
+            int step;
+            bool move;
+            int controller, point, row;
+        } shots[] = {
+            {"ctl-main-move", 0, true, 0, 0, 1},       {"ctl-main-move-off", 0, true, 1, 0, 2},
+            {"ctl-main-dualsense", 0, false, 0, 0, 6}, {"ctl-main-classic", 0, false, 3, 0, 3},
+            {"ctl-points-1", 8, true, 0, 0, 0},       {"ctl-points-3", 8, true, 0, 2, 0},
+            {"ctl-tune-move", 6, true, 0, 0, 0},      {"ctl-tune-dualsense", 6, false, 0, 0, 1},
+            {"ctl-template", 7, true, 0, 0, 0},
+            {"ctl-main-move-color", 0, true, 0, 0, 7}, {"ctl-ready", 9, true, 0, 0, 0},
+        };
+        settings.move_color = 1; /* a blue ball */
+        if (const char *only = getenv("PV_HUB"))
+        {
+            if (const char *mode = getenv("PV_HUB_MODE"))
+                settings.ui_mode = atoi(mode); /* 0 dark, 1 OLED, 2 light */
+            if (const char *theme = getenv("PV_HUB_THEME"))
+                settings.ui_theme = atoi(theme);
+            /* The Controller Hub: name, move, controller, view, open, focus, sub. */
+            struct Hub
+            {
+                const char *name;
+                bool move;
+                int controller, view, open, focus, sub;
+            } hubs[] = {
+                {"hub-front-move", true, 0, 0, -1, 3, 0},      {"hub-front-ds", false, 0, 0, -1, 1, 0},
+                {"hub-all-move", true, 0, 1, -1, 100, 0},      {"hub-hold-move", true, 0, 1, 0, 100, 0},
+                {"hub-buttons-move", true, 0, 1, 1, 101, 0},  {"hub-buttons-ds", false, 0, 1, 1, 1004, 0},
+                {"hub-buttons-ds-remote", false, 1, 1, 1, 101, 0},
+                {"hub-pointer-move", true, 0, 1, 2, 1008, 0}, {"hub-pointer-ds", false, 0, 1, 2, 1007, 0},
+                {"hub-ball", true, 0, 1, 3, 1012, 1},          {"hub-motion-move", true, 0, 1, 4, 1013, 0},
+                {"hub-motion-ds", false, 0, 1, 4, 1015, 0},    {"hub-other", false, 3, 1, 5, 1019, 0},
+                {"hub-sensor", true, 0, 1, 6, 106, 0},         {"hub-saved", true, 0, 1, 7, 1024, 0},
+                {"hub-hold-two", false, 4, 1, 0, 1000, 0},     {"hub-front-gc", false, 5, 0, -1, 3, 1},
+            };
+            if (!strcmp(only, "players"))
+            {
+                /* 4.5 Beta 4: the switcher, and players 2 to 4's pages. */
+                struct P
+                {
+                    const char *name;
+                    int controller, player, hold, as;
+                    bool move;
+                } ps[] = {{"hub-p1", 0, 0, 0, 0, true},      {"hub-p2-ds", 0, 1, 0, 0, true},
+                          {"hub-p2-ds-classic", 0, 1, 0, 4, false}, {"hub-p3-move", 0, 2, 1, 0, true},
+                          {"hub-p3-nav", 0, 2, 2, 0, true},  {"hub-p4-moveds", 0, 3, 3, 0, true},
+                          {"hub-p2-two", 4, 1, 0, 0, false}};
+                for (const P &q : ps)
+                {
+                    ui.preview_ctl_hub(q.move, q.controller, 0, -1, 1, 0);
+                    ui.preview_hub_player(q.player, q.hold, q.as);
+                    for (int i = 0; i < 30; ++i)
+                        ui.update(none, 0.016);
+                    render(q.name, [&] { ui.draw(12.0); });
+                }
+                return 0;
+            }
+            if (!strcmp(only, "walk"))
+            {
+                /* The D-pad through it: the tiles, All settings, a section, a value, back. */
+                const std::uint32_t kUp = 1u << 0, kLeft = 1u << 2;
+                ui.preview_ctl_hub(false, 0, 0, -1, 1, 0);
+                settle();
+                press(kDown, 2);
+                press(kRight, 1);
+                settle();
+                render("hub-walk-1-tile", [&] { ui.draw(12.0); });
+                press(kDown);
+                press(kCross);
+                settle();
+                render("hub-walk-2-all", [&] { ui.draw(12.0); });
+                press(kDown, 2); /* to Pointer's head */
+                press(kCross);
+                press(kDown, 2); /* Aim with, Speed */
+                press(kRight, 2);
+                settle();
+                render("hub-walk-3-speed", [&] { ui.draw(12.0); });
+                press(kDown, 6);
+                settle();
+                render("hub-walk-4-down", [&] { ui.draw(12.0); });
+                press(kUp, 12);
+                press(kLeft);
+                settle();
+                render("hub-walk-5-main", [&] { ui.draw(12.0); });
+                press(kCircle);
+                settle();
+                render("hub-walk-6-back", [&] { ui.draw(12.0); });
+                press(kCircle);
+                settle();
+                render("hub-walk-7-closed", [&] { ui.draw(12.0); });
+                return 0;
+            }
+            for (const Hub &h : hubs)
+            {
+                if (*only && !strstr(h.name, only))
+                    continue;
+                ui.preview_ctl_hub(h.move, h.controller, h.view, h.open, h.focus, h.sub);
+                for (int i = 0; i < 40; ++i)
+                    ui.update(none, 0.016);
+                ui.preview_ctl_hub(h.move, h.controller, h.view, h.open, h.focus, h.sub);
+                for (int i = 0; i < 20; ++i)
+                    ui.update(none, 0.016);
+                render(h.name, [&] { ui.draw(12.0); });
+            }
+            return 0;
+        }
+        for (const Shot &s : shots)
+        {
+            ui.preview_controllers(s.step, s.move, s.controller, s.point, s.row);
+            for (int i = 0; i < 20; ++i)
+                ui.update(none, 0.016);
+            ui.preview_controllers(s.step, s.move, s.controller, s.point, s.row);
+            render(s.name, [&] { ui.draw(12.0); });
+        }
+        press(kCircle, 6);
+        settle();
+        for (int theme : {0, 1, int(porpoise::ui::ThemeId::StarCube)})
+        {
+            settings.ui_theme = theme;
+            ui.preview_ctl_toasts();
+            for (int i = 0; i < 30; ++i)
+                ui.update(none, 0.016);
+            const std::string name = "ctl-toasts-" + std::to_string(theme);
+            render(name.c_str(), [&] { ui.draw(12.0); });
+        }
+        return 0;
+    }
 
     /* PREVIEW_27=1: 2.7's Apply: Settings with changes waiting, the question
      * on leaving, the restart question; the in-game menu the same way; the

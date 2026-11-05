@@ -5,6 +5,7 @@
 #include "porpoise_bios.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -89,6 +90,73 @@ std::vector<GameCubeBios> find_gamecube(const std::string &dir)
     std::vector<GameCubeBios> out;
     look_in(dir, 1, out);
     return out;
+}
+
+namespace
+{
+std::string segaboot_in(const std::string &dir, int depth)
+{
+    DIR *d = opendir(dir.c_str());
+    if (!d)
+        return {};
+    std::vector<std::string> names;
+    while (dirent *e = readdir(d))
+        if (e->d_name[0] != '.')
+            names.push_back(e->d_name);
+    closedir(d);
+    auto lower_of = [](std::string s) {
+        for (char &c : s)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::sort(names.begin(), names.end(),
+              [&](const std::string &a, const std::string &b) { return lower_of(a) < lower_of(b); });
+    std::vector<std::string> dirs;
+    /* A .gcm first, then a .bin, then any other file named so (not a zip or
+     * a readme beside it). */
+    std::string best;
+    int best_rank = 0;
+    for (const std::string &name : names)
+    {
+        const std::string path = dir + "/" + name;
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode))
+        {
+            dirs.push_back(path);
+            continue;
+        }
+        const std::string lower = lower_of(name);
+        if (!S_ISREG(st.st_mode) || st.st_size < 65536 || lower.find("segaboot") == std::string::npos)
+            continue;
+        auto ends = [&](const char *ext) {
+            const std::size_t n = std::strlen(ext);
+            return lower.size() >= n && lower.compare(lower.size() - n, n, ext) == 0;
+        };
+        const int rank = ends(".gcm") ? 3 : ends(".bin") ? 2 : ends(".zip") || ends(".7z") || ends(".rar") || ends(".txt") ? 0 : 1;
+        if (rank > best_rank)
+        {
+            best = path;
+            best_rank = rank;
+        }
+    }
+    if (!best.empty())
+        return best;
+    if (depth > 0)
+        for (const std::string &sub : dirs)
+        {
+            std::string found = segaboot_in(sub, depth - 1);
+            if (!found.empty())
+                return found;
+        }
+    return {};
+}
+} // namespace
+
+std::string find_segaboot(const std::string &dir)
+{
+    return segaboot_in(dir, 1);
 }
 
 const GameCubeBios *for_region(const std::vector<GameCubeBios> &found, bool pal)

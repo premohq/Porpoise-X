@@ -106,8 +106,50 @@ void fuse(Fusion &f, const float gyro[3], const float accel[3], float dt)
     V3 w = raw - V3{f.bias[0], f.bias[1], f.bias[2]};
 
     /* The gyroscope's drift: what it reads while the controller lies still. */
-    const bool quiet = std::fabs(w.x) < 0.04f && std::fabs(w.y) < 0.04f && std::fabs(w.z) < 0.04f &&
-                       std::fabs(an - kRestG) < 0.06f;
+    bool quiet = std::fabs(w.x) < 0.04f && std::fabs(w.y) < 0.04f && std::fabs(w.z) < 0.04f &&
+                 std::fabs(an - kRestG) < 0.06f;
+    if (f.steady)
+    {
+        /* Still: a third of a second whose readings stay put (the hand's
+         * tremble, ~0.02 rad/s, allowed); its average is the drift. */
+        f.win_t += dt;
+        f.win_n += 1;
+        const float r[3] = {raw.x, raw.y, raw.z};
+        for (int i = 0; i < 3; ++i)
+        {
+            f.win_s[i] += r[i];
+            f.win_q[i] += r[i] * r[i];
+        }
+        f.win_g += an;
+        f.win_gq += an * an;
+        if (f.win_t >= 0.35f)
+        {
+            const float n = f.win_n;
+            bool calm = n >= 20;
+            float mean[3];
+            for (int i = 0; i < 3 && calm; ++i)
+            {
+                mean[i] = f.win_s[i] / n;
+                const float var = f.win_q[i] / n - mean[i] * mean[i];
+                calm = var < 0.03f * 0.03f && std::fabs(mean[i]) < 0.3f &&
+                       (!f.learnt || std::fabs(mean[i] - f.bias[i]) < 0.06f);
+            }
+            const float gm = f.win_g / n;
+            calm = calm && f.win_gq / n - gm * gm < 0.012f * 0.012f;
+            if (calm)
+            {
+                const float k = f.learnt ? 0.3f : 1.0f;
+                for (int i = 0; i < 3; ++i)
+                    f.bias[i] += (mean[i] - f.bias[i]) * k;
+                f.learnt = true;
+            }
+            f.win_t = f.win_g = f.win_gq = 0;
+            f.win_n = 0;
+            for (int i = 0; i < 3; ++i)
+                f.win_s[i] = f.win_q[i] = 0;
+        }
+        quiet = false; /* (learnt above) */
+    }
     f.still = quiet ? f.still + dt : 0.0f;
     if (f.still > 0.4f)
     {
@@ -124,7 +166,17 @@ void fuse(Fusion &f, const float gyro[3], const float accel[3], float dt)
         const V3 measured = a * (1.0f / an);
         const V3 estimated = rotate_back(f.q, {0, 0, 1});
         const float kp = f.age < 1.0f ? 5.0f : 0.5f;
-        w = w + cross(measured, estimated) * kp;
+        const V3 e = cross(measured, estimated);
+        w = w + e * kp;
+        /* The Move: what gravity keeps having to put right is drift too (in
+         * the two axes gravity can see), learnt slowly as it plays. */
+        if (f.steady && f.age > 2.0f && an > 0.92f && an < 1.2f && dot(w, w) < 1.0f)
+        {
+            constexpr float kKi = 0.03f;
+            f.bias[0] = std::clamp(f.bias[0] - e.x * kKi * dt, -0.3f, 0.3f);
+            f.bias[1] = std::clamp(f.bias[1] - e.y * kKi * dt, -0.3f, 0.3f);
+            f.bias[2] = std::clamp(f.bias[2] - e.z * kKi * dt, -0.3f, 0.3f);
+        }
     }
 
     /* q += q * (0, w) dt / 2 */
@@ -134,6 +186,20 @@ void fuse(Fusion &f, const float gyro[3], const float accel[3], float dt)
     f.q[1] = y + s * hy + z * hx - x * hz;
     f.q[2] = z + s * hz + x * hy - y * hx;
     f.q[3] = s - x * hx - y * hy - z * hz;
+    normalise(f.q);
+}
+
+void turn_world(Fusion &f, float a)
+{
+    if (!f.started || a == 0)
+        return;
+    /* q = (0, 0, sin a/2, cos a/2) * q */
+    const float hz = std::sin(a * 0.5f), hw = std::cos(a * 0.5f);
+    const float x = f.q[0], y = f.q[1], z = f.q[2], s = f.q[3];
+    f.q[0] = hw * x - hz * y;
+    f.q[1] = hw * y + hz * x;
+    f.q[2] = hw * z + hz * s;
+    f.q[3] = hw * s - hz * z;
     normalise(f.q);
 }
 
@@ -280,9 +346,11 @@ void sensor_bar(float x, float y, float roll, Dot out[2], float range, bool bar_
     /* Up to a little past the screen's edges the game's cursor stays pinned
      * at the edge (a real Remote would lose the bar there, but on a menu's
      * top row that only makes the cursor blink away); further out, the lights
-     * go, as when a Remote points away from the TV. The roll the camera sees
-     * is held to 30 degrees: enough for the cursor to tilt with the hand,
-     * without turning the bar out of the camera's narrow view. */
+     * go, as when a Remote points away from the TV. The roll is the
+     * controller's own, all the way round: a game checks the lights against
+     * the Remote's accelerometer, and lights held level while it felt a
+     * quarter turn or more read as wrong, so the cursor went (the Wii's HOME
+     * Menu hand turned, then vanished). */
     if (std::fabs(x) > 1.3f || std::fabs(y) > 1.3f)
     {
         out[0] = out[1] = Dot{};
@@ -290,14 +358,14 @@ void sensor_bar(float x, float y, float roll, Dot out[2], float range, bool bar_
     }
     x = std::clamp(x, -1.06f, 1.06f);
     y = std::clamp(y, -1.06f, 1.06f);
-    roll = std::clamp(roll, -0.52f, 0.52f);
     sensor_bar_at(x, y, roll, out, range, bar_above);
-    /* Past what the camera can see (a wide range's lower edge): pulled in
-     * until both lights are in view, so the pointer pins rather than goes. */
+    /* Past what the camera can see (a wide range's lower edge, or a corner
+     * with the Remote turned on its side): pulled in until both lights are in
+     * view, so the pointer pins rather than goes. */
     for (int i = 1; i <= 30 && !(out[0].visible && out[1].visible); ++i)
     {
         const float k = 1.0f - 0.02f * float(i);
-        sensor_bar_at(x * k, y * k, roll * k, out, range, bar_above);
+        sensor_bar_at(x * k, y * k, roll, out, range, bar_above);
     }
 }
 

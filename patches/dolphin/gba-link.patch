@@ -298,7 +298,7 @@ index 5f74d2d..5e3ae9e 100644
  // do, so Dolphin's mixer fills the gaps when a game runs slow (instead of the front end's
  // queue running dry and crackling). pull 0 goes back to the sound pushed each frame.
 diff --git a/Source/Core/DolphinLibretro/Boot.cpp b/Source/Core/DolphinLibretro/Boot.cpp
-index e2260dc..908a07b 100644
+index 6eabcc2..95313c3 100644
 --- a/Source/Core/DolphinLibretro/Boot.cpp
 +++ b/Source/Core/DolphinLibretro/Boot.cpp
 @@ -337,6 +337,16 @@ bool retro_load_game(const struct retro_game_info* game)
@@ -337,7 +337,7 @@ index e2260dc..908a07b 100644
 +
  #ifdef __PROSPERO__
    std::fprintf(stderr, "core: booting (%s)\n", porpoise_menu.empty() ? "the game" : porpoise_menu.c_str());
- #endif
+   std::fprintf(stderr, "core: cpu vendor %d, %s, PEXT/PDEP %s\n", static_cast<int>(cpu_info.vendor),
 diff --git a/Source/Core/DolphinLibretro/CMakeLists.txt b/Source/Core/DolphinLibretro/CMakeLists.txt
 index 2e5629c..f8f0515 100644
 --- a/Source/Core/DolphinLibretro/CMakeLists.txt

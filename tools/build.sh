@@ -261,9 +261,11 @@ build_system_link_stub() {
 
 agc_stub=$(build_system_link_stub libSceAgc tooling/ps5-stubs/agc_link_stub.c)
 agc_driver_stub=$(build_system_link_stub libSceAgcDriver tooling/ps5-stubs/agc_driver_link_stub.c)
+# Move test builds: the device bus, for the PlayStation Move (src/porpoise_move_test.cpp).
+mbus_stub=$(build_system_link_stub libSceMbus tooling/ps5-stubs/mbus_link_stub.c)
 
 link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}")
-link_inputs+=("$agc_stub" "$agc_driver_stub")
+link_inputs+=("$agc_stub" "$agc_driver_stub" "$mbus_stub")
 # The Vulkan driver, linked whole. These archives are the reason this title does
 # not dlopen: a PS5 title cannot (../PS5_Vulkan measured ENOEXEC/ENOENT/NULL from
 # sceKernelLoadStartModule and dlopen, and ESRCH from sceKernelDlsym), so the
@@ -343,7 +345,7 @@ fi
     --as-needed "$sdk_root"/target/lib/*.so
 "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
     --stub-dir "$sdk_root/target/lib" --stub "$agc_stub" \
-    --stub "$agc_driver_stub" --module-sdk "$module_sdk" \
+    --stub "$agc_driver_stub" --stub "$mbus_stub" --module-sdk "$module_sdk" \
     --companion-sdk "$companion_sdk" --file-name eboot.elf
 
 app="$dist/$title_id"

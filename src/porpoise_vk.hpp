@@ -48,6 +48,22 @@ bool vblank_ready();
 void note_videoout(int handle);
 bool wait_vblank();
 
+/* Settings > Video > Refresh Rate: VRR. Porpoise itself puts the output at
+ * 119.88 Hz when the driver's VideoOut opens (the driver, told nothing of
+ * 120 Hz, would take VRR's long refreshes for 60 Hz and put it back), and puts
+ * it back as Porpoise closes. Call before the display opens. */
+void set_own_high_rate(bool on);
+bool own_high_rate();   /* the output was put at 119.88 Hz by Porpoise */
+void restore_output();  /* 59.94 Hz again (Porpoise closing) */
+
+/* Under VRR the TV has no steady refresh to wait on: frame generation then
+ * gets one of Porpoise's own, ticks of a clock at hz (0: the TV's vblank again). */
+void set_virtual_vblank(double hz);
+double virtual_vblank_hz();
+/* Counts each change of it: the game's pacing starts over on one (the
+ * vblank it waits on changed). */
+unsigned virtual_vblank_changes();
+
 /* The core's frame, aspect-fit onto the screen. aspect <= 0 uses w / h. */
 /* filter: 0 smooth, 1 sharp, 2 sharpen, 3 CRT, 4 arcade CRT, 5 VHS; strength 0..1. */
 void present_core_frame(unsigned width, unsigned height, float aspect, int filter, float strength);
@@ -56,6 +72,8 @@ void set_game_colour_filter(int mode);
 /* Enhancements: saturation and contrast (1 as it is), warmth (0 as it is),
  * bloom 0..1, on the game's picture. */
 void set_picture_adjust(float saturation, float contrast, float warmth, float bloom);
+/* The game's picture cropped: left, top, right, bottom, each a share of it (0..0.1). */
+void set_crop(const float crop[4]);
 /* A copy of the game's last picture (width x height, RGBA), for thumbnails. */
 bool capture_picture(unsigned width, unsigned height, std::vector<std::uint8_t> &rgba);
 /* Where the last game picture was drawn, as x, y, w, h in 1920x1080 design space. */

@@ -157,6 +157,30 @@ void fit_side(const unsigned char *pixels, int &w, int &h, int max_side, std::ve
         out.assign(pixels, pixels + std::size_t(w) * std::size_t(h) * 4);
     else
         out.swap(small);
+    /* A very narrow picture (a case's spine, cut from the full box: 20-40
+     * pixels across) came out as scrambled blocks on the console's GPU, as
+     * small pictures did before (save icons are enlarged for it): each pixel
+     * repeated across, to 64 or more. It looks the same, drawn. */
+    auto widen = [&](bool across) {
+        const int n = across ? w : h;
+        if (n <= 0 || n >= 64)
+            return;
+        const int k = (64 + n - 1) / n;
+        const int nw = across ? w * k : w, nh = across ? h : h * k;
+        std::vector<unsigned char> big(std::size_t(nw) * std::size_t(nh) * 4);
+        for (int y = 0; y < nh; ++y)
+            for (int x = 0; x < nw; ++x)
+            {
+                const int sx = across ? x / k : x, sy = across ? y : y / k;
+                std::memcpy(&big[(std::size_t(y) * std::size_t(nw) + std::size_t(x)) * 4],
+                            &out[(std::size_t(sy) * std::size_t(w) + std::size_t(sx)) * 4], 4);
+            }
+        out.swap(big);
+        w = nw;
+        h = nh;
+    };
+    widen(true);
+    widen(false);
 }
 
 /* ---- pictures decoded off the render thread (Gfx::texture_file_async) ----
@@ -249,11 +273,18 @@ void start_loader_locked(Loader &L)
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 1u << 20);
-    pthread_t t;
-    L.started = pthread_create(&t, &attr, load_work, nullptr) == 0;
+    /* Two at once: a library scrolled through quickly fills in twice as fast
+     * (each takes the newest request it finds). */
+    for (int i = 0; i < 2; ++i)
+    {
+        pthread_t t;
+        if (pthread_create(&t, &attr, load_work, nullptr) == 0)
+        {
+            L.started = true;
+            pthread_detach(t);
+        }
+    }
     pthread_attr_destroy(&attr);
-    if (L.started)
-        pthread_detach(t);
 }
 
 std::uint32_t next_codepoint(const std::string &s, std::size_t &i)
@@ -659,6 +690,107 @@ Texture *Gfx::texture_file_async(const std::string &path, bool *pending, int max
 /* Like upload(), but the copy is recorded into this frame's own command
  * buffer (record_uploads, before the render pass) instead of being submitted
  * and waited on: no stall. */
+namespace
+{
+/* A picture's two strongest colours: the vivid, bright ones weigh most; the
+ * second is the strongest of a different hue. Made glow-ready: not too dark,
+ * not grey. */
+void picture_tones(const std::uint8_t *px, int w, int h, float out[6])
+{
+    struct S
+    {
+        float r, g, b, hue, weight;
+    };
+    std::vector<S> samples;
+    samples.reserve(1024);
+    const int step_x = std::max(1, w / 32), step_y = std::max(1, h / 32);
+    float pr = 0, pg = 0, pb = 0, pw = 0;
+    for (int y = step_y / 2; y < h; y += step_y)
+        for (int x = step_x / 2; x < w; x += step_x)
+        {
+            const std::uint8_t *p = px + (std::size_t(y) * w + x) * 4;
+            const float r = p[0] / 255.0f, g = p[1] / 255.0f, b = p[2] / 255.0f;
+            const float mx = std::max({r, g, b}), mn = std::min({r, g, b});
+            const float sat = mx > 0 ? (mx - mn) / mx : 0;
+            float hue = 0;
+            if (mx - mn > 1e-4f)
+            {
+                if (mx == r)
+                    hue = std::fmod((g - b) / (mx - mn) / 6.0f + 1.0f, 1.0f);
+                else if (mx == g)
+                    hue = ((b - r) / (mx - mn) + 2.0f) / 6.0f;
+                else
+                    hue = ((r - g) / (mx - mn) + 4.0f) / 6.0f;
+            }
+            const float weight = sat * sat * mx + 0.02f * mx;
+            samples.push_back({r, g, b, hue, weight});
+            pr += r * weight;
+            pg += g * weight;
+            pb += b * weight;
+            pw += weight;
+        }
+    auto finish = [](float r, float g, float b, float *o) {
+        /* Bright enough to glow, and colour, not grey. */
+        float mx = std::max({r, g, b}), mn = std::min({r, g, b});
+        if (mx < 1e-4f)
+        {
+            r = g = b = 0.25f;
+            mx = 0.25f;
+            mn = 0.25f;
+        }
+        const float lift = 0.85f / mx;
+        r *= lift, g *= lift, b *= lift;
+        const float avg = (r + g + b) / 3.0f;
+        const float sat = (mx - mn) / mx;
+        if (sat < 0.45f)
+        {
+            const float k = sat > 0.02f ? std::min(2.2f, 0.45f / sat) : 1.0f;
+            r = avg + (r - avg) * k, g = avg + (g - avg) * k, b = avg + (b - avg) * k;
+        }
+        o[0] = std::clamp(r, 0.0f, 1.0f);
+        o[1] = std::clamp(g, 0.0f, 1.0f);
+        o[2] = std::clamp(b, 0.0f, 1.0f);
+    };
+    if (pw <= 0)
+        return;
+    float main_c[3] = {pr / pw, pg / pw, pb / pw};
+    /* The main colour's hue. */
+    float mh = 0;
+    {
+        float best = -1;
+        for (const S &s : samples)
+            if (s.weight > best)
+            {
+                best = s.weight;
+                mh = s.hue;
+            }
+    }
+    float sr = 0, sg = 0, sb = 0, sw = 0;
+    for (const S &s : samples)
+    {
+        float d = std::fabs(s.hue - mh);
+        d = std::min(d, 1.0f - d);
+        if (d > 0.10f)
+        {
+            sr += s.r * s.weight;
+            sg += s.g * s.weight;
+            sb += s.b * s.weight;
+            sw += s.weight;
+        }
+    }
+    finish(main_c[0], main_c[1], main_c[2], out);
+    if (sw > pw * 0.08f)
+        finish(sr / sw, sg / sw, sb / sw, out + 3);
+    else
+    {
+        /* One colour throughout: the other glow a deeper shade of it. */
+        out[3] = out[0] * 0.55f;
+        out[4] = out[1] * 0.55f;
+        out[5] = out[2] * 0.75f;
+    }
+}
+} // namespace
+
 Texture *Gfx::upload_later(const std::uint8_t *pixels, int width, int height)
 {
     if (!device_ || width <= 0 || height <= 0)
@@ -666,6 +798,25 @@ Texture *Gfx::upload_later(const std::uint8_t *pixels, int width, int height)
     auto *t = new Texture();
     t->width = width;
     t->height = height;
+    if (pixels)
+    {
+        picture_tones(pixels, width, height, t->tone);
+        double sum[3] = {0, 0, 0};
+        int n = 0;
+        for (int y = 0; y < height; y += 2)
+            for (int x : {0, 1, width - 2, width - 1})
+            {
+                if (x < 0 || x >= width)
+                    continue;
+                const std::uint8_t *p = pixels + (std::size_t(y) * std::size_t(width) + std::size_t(x)) * 4;
+                for (int c = 0; c < 3; ++c)
+                    sum[c] += p[c];
+                ++n;
+            }
+        if (n)
+            for (int c = 0; c < 3; ++c)
+                t->edge[c] = float(sum[c] / n / 255.0);
+    }
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     info.imageType = VK_IMAGE_TYPE_2D;
     info.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -1368,6 +1519,8 @@ bool Gfx::make_theme_fonts(const std::string &set, FontData *out, std::vector<st
     static const char *const kMplus[4] = {"MPLUS1-Regular.ttf", "MPLUS1-SemiBold.ttf", "MPLUS1-Bold.ttf",
                                           "MPLUS1-ExtraBold.ttf"};
     static const char *const kExo[4] = {"Exo2-Regular.ttf", "Exo2-SemiBold.ttf", "Exo2-Bold.ttf", "Exo2-ExtraBold.ttf"};
+    static const char *const kManrope[4] = {"Manrope-Regular.ttf", "Manrope-SemiBold.ttf", "Manrope-Bold.ttf",
+                                            "Manrope-ExtraBold.ttf"}; /* the Porpoise look's */
     static const char *const kLora[4] = {"PorpoiseSerif-Regular.ttf", "PorpoiseSerif-SemiBold.ttf", "PorpoiseSerif-Bold.ttf",
                                          "PorpoiseSerif-ExtraBold.ttf"}; /* Lora, renamed */
     const char *const *files = set == "mono"   ? kMono
@@ -1377,6 +1530,7 @@ bool Gfx::make_theme_fonts(const std::string &set, FontData *out, std::vector<st
                                : set == "mplus" ? kMplus
                                : set == "exo"  ? kExo
                                : set == "lora" ? kLora
+                               : set == "manrope" ? kManrope
                                                : nullptr;
     if (!files)
         return false;
@@ -1565,6 +1719,7 @@ bool Gfx::init(const GfxInit &init)
     }
     brand_mask_ = texture_file(init_.asset_dir + "/brand/dolphin-mask.png");
     icons_ = texture_file(init_.asset_dir + "/ui/buttons.png");
+    icons_solid_ = texture_file(init_.asset_dir + "/ui/buttons-solid.png");
     vertices_.reserve(vcapacity_);
     return true;
 }
@@ -1583,7 +1738,7 @@ void Gfx::shutdown()
     for (auto &dead : graveyard_)
         destroy_texture(dead.texture);
     graveyard_.clear();
-    white_ = atlas_ = brand_mask_ = icons_ = cjk_atlas_ = theme_atlas_ = nullptr;
+    white_ = atlas_ = brand_mask_ = icons_ = icons_solid_ = cjk_atlas_ = theme_atlas_ = nullptr;
     for (std::size_t i = 0; i < vbufs_.size(); ++i)
     {
         if (vmaps_[i])
@@ -1714,6 +1869,12 @@ void Gfx::push(Texture *t, const Vertex v[4])
         o.pos[1] += dy * 2.0f / kDesignH * o.pos[3];
         if (int(o.p0[0] + 0.5f) == K_GLASS)
             o.p2[3] *= fade;
+        else if (kind == K_PANEL)
+        {
+            o.p2[3] *= fade; /* (thin glass fades by it) */
+            o.color[3] *= fade;
+            o.bcolor[3] *= fade;
+        }
         else
         {
             o.color[3] *= fade;
@@ -1859,6 +2020,13 @@ void Gfx::panel(float x, float y, float w, float h, Color fill_c, float bottom_m
     float margin = glow > 0 ? glow * 3.0f : 1.0f;
     if (look_.panel_style == 1 && fill_c.a > 0.05f && !look_.high_contrast && !solid_)
         margin = std::max(margin, std::min(30.0f, std::min(w, h) * 0.5f + 8)); /* room for its shadow */
+    /* Thin glass is for pieces of glass: a rule, a dot or a bar stays a plain shape. */
+    /* ...and a whole-screen panel is a dim, not glass: as frost it drew the
+     * room over everything, nearly opaque, the moment it showed (the menu's
+     * backdrop went pale at once; a dialog hid what it was about). */
+    const bool plain = solid_ || (look_.panel_style >= 2 && (std::min(w, h) < 10.0f || (w >= 1900 && h >= 1060)));
+    if (look_.panel_style >= 2 && fill_c.a > 0.02f && !look_.high_contrast && !plain)
+        margin = std::max(margin, std::min(80.0f, std::min(w, h) * 0.6f + 30)); /* its soft shadow */
     Vertex v[4]{};
     float pos[4][4];
     corners_flat(x - margin, y - margin, w + margin * 2, h + margin * 2, pos);
@@ -1870,7 +2038,7 @@ void Gfx::panel(float x, float y, float w, float h, Color fill_c, float bottom_m
         fill(v[i].color, {fill_c.r, fill_c.g, fill_c.b, fill_c.a});
         fill(v[i].p0, {float(K_PANEL), radius * px, border_w * px, glow * px});
         fill(v[i].p1, {(w + margin * 2) * px, (h + margin * 2) * px, w * px, h * px});
-        fill(v[i].p2, {bottom_mul, sheen, solid_ ? 1.0f : 0.0f, 0});
+        fill(v[i].p2, {bottom_mul, sheen, plain ? 1.0f : 0.0f, presence_}); /* (w: thin glass's presence) */
         fill(v[i].bcolor, {border.r, border.g, border.b, border.a});
     }
     push(nullptr, v);
@@ -1940,14 +2108,15 @@ void Gfx::icon(Icon i, float cx, float cy, float size, Color c)
     c = tone(c);
     constexpr int kCols = 8, kRows = 4;
     const int n = int(i);
-    if (!icons_ || n < 0 || n >= int(Icon::Count))
+    Texture *const sheet = solid_icons_ && icons_solid_ ? icons_solid_ : icons_;
+    if (!sheet || n < 0 || n >= int(Icon::Count))
         return;
     /* Half a texel in from the cell's edge, so neighbours never bleed in. */
     const float cu = 1.0f / kCols, cv = 1.0f / kRows;
-    const float hu = 0.5f / float(icons_->width), hv = 0.5f / float(icons_->height);
+    const float hu = 0.5f / float(sheet->width), hv = 0.5f / float(sheet->height);
     const float u0 = float(n % kCols) * cu, v0 = float(n / kCols) * cv;
     const float uv[4] = {u0 + hu, v0 + hv, u0 + cu - hu, v0 + cv - hv};
-    image_part(icons_, cx - size * 0.5f, cy - size * 0.5f, size, size, uv, c);
+    image_part(sheet, cx - size * 0.5f, cy - size * 0.5f, size, size, uv, c);
 }
 
 void Gfx::glyph(Glyph g, float cx, float cy, float size, Color c, float rotation)
@@ -2096,17 +2265,39 @@ void Gfx::quad3d(Texture *t, const Corner c[4], float shape_w, float shape_h, Co
     const float u0 = uv_rect ? uv_rect[0] : 0.0f, v0 = uv_rect ? uv_rect[1] : 0.0f;
     const float u1 = uv_rect ? uv_rect[2] : 1.0f, v1 = uv_rect ? uv_rect[3] : 1.0f;
     const float px = target_w_ / kDesignW;
+    /* Drawn a little past its edges, so the shader can soften them on both
+     * sides: drawn to the edge exactly, a face's outline went from nothing
+     * to half covered in one pixel, and stepped along its slope (a case's
+     * top edge, in the library). The face is flat in the room, so a point
+     * past its corners is found in clip space (x*w, y*w, w), where a flat
+     * rectangle's points are linear. */
+    const float m = 1.5f; /* design pixels */
+    const float eu = shape_w > 4 ? m / shape_w : 0.0f, ev = shape_h > 4 ? m / shape_h : 0.0f;
+    float H[4][3];
+    for (int i = 0; i < 4; ++i)
+    {
+        H[i][0] = c[i].x * c[i].w;
+        H[i][1] = c[i].y * c[i].w;
+        H[i][2] = c[i].w;
+    }
     Vertex v[4]{};
     const float local[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     for (int i = 0; i < 4; ++i)
     {
-        to_clip(c[i], v[i].pos);
-        const float ly = flip_v ? 1.0f - local[i][1] : local[i][1];
-        fill(v[i].uv, {u0 + (u1 - u0) * local[i][0], v0 + (v1 - v0) * ly});
+        const float u = -eu + local[i][0] * (1 + 2 * eu), w8 = -ev + local[i][1] * (1 + 2 * ev);
+        float h3[3];
+        for (int k = 0; k < 3; ++k)
+            h3[k] = H[0][k] * (1 - u) * (1 - w8) + H[1][k] * u * (1 - w8) + H[2][k] * u * w8 + H[3][k] * (1 - u) * w8;
+        const Corner e{h3[0] / h3[2], h3[1] / h3[2], h3[2]};
+        to_clip(eu > 0 && ev > 0 && h3[2] > 1e-4f ? e : c[i], v[i].pos);
+        const float lu = eu > 0 && ev > 0 ? u : local[i][0], lv = eu > 0 && ev > 0 ? w8 : local[i][1];
+        const float ly = flip_v ? 1.0f - lv : lv;
+        fill(v[i].uv, {u0 + (u1 - u0) * lu, v0 + (v1 - v0) * ly});
         fill(v[i].local, {local[i][0], local[i][1]});
         fill(v[i].color, {tint.r, tint.g, tint.b, tint.a});
         fill(v[i].p0, {float(reflection ? K_REFLECTION : K_COVER), radius * px, 0, 0});
-        fill(v[i].p1, {shape_w * px, shape_h * px, shape_w * px, shape_h * px});
+        const float qw = eu > 0 && ev > 0 ? shape_w + 2 * m : shape_w, qh = eu > 0 && ev > 0 ? shape_h + 2 * m : shape_h;
+        fill(v[i].p1, {qw * px, qh * px, shape_w * px, shape_h * px});
     }
     push(t, v);
 }
@@ -2135,6 +2326,26 @@ void Gfx::panel3d(const Corner c[4], float shape_w, float shape_h, float margin,
 void Gfx::glass(const Corner c[4], float shape_w, float shape_h, float margin, const Glass &g_in)
 {
     Glass g0 = g_in;
+    if (look_.panel_style >= 2 && !look_.high_contrast)
+    {
+        /* The Porpoise look: every piece of glass is its thin glass (no rim of
+         * colour, no thickness); the one in focus (it glows) brighter. */
+        if (g0.face == 1)
+            return; /* a thickness slice */
+    }
+    if (look_.panel_style >= 2 && !look_.high_contrast && g0.face == 0)
+    {
+        const bool lit = g0.glow > 0, light = look_.effect > 1.5f;
+        const Color fill = light ? rgba(0xFFFFFF, (lit ? 0.97f : 0.60f) * g0.fade)
+                                 : rgba(0xFFFFFF, (lit ? 0.21f : 0.09f) * g0.fade);
+        const Color rim = light ? (lit ? rgba(0x9AA6B6, 0.6f * g0.fade) : rgba(0xFFFFFF, 0.95f * g0.fade))
+                                : rgba(0xFFFFFF, (lit ? 0.52f : 0.20f) * g0.fade);
+        const bool was = tone_;
+        tone_ = false;
+        panel3d(c, shape_w, shape_h, margin, fill, 1, g0.radius, rim, 1.0f, 0, 0);
+        tone_ = was;
+        return;
+    }
     if (look_.bold_focus && g0.glow > 0 && g0.face == 0)
     {
         g0.rim_w = std::max(g0.rim_w * 2.0f, 5.0f); /* Bolder Focus */
@@ -2243,6 +2454,10 @@ float Gfx::text(Font font, float size, float x, float y, Color c, Align a, const
                 float weight)
 {
     c = tone(c);
+    /* A look can make small words a touch heavier (the Porpoise look's at
+     * 1080p, scaled up by a 4K TV, read thin): the most at 14 px, none from 30. */
+    if (text_boost_ > 0)
+        weight += text_boost_ * std::clamp((30.0f - size) / 16.0f, 0.0f, 1.0f);
     const FontData &f = face(font);
     const float k = size / kBase;
     const float width = measure(font, size, s, spacing);

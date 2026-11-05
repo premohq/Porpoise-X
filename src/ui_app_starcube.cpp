@@ -319,8 +319,9 @@ App::Action App::update_starcube(bool left, bool right, bool up, bool down, bool
         sc_open_details();
     if (pressed(BtnOptions))
     {
-        lib_->toggle_favourite(games[std::size_t(selected_)]);
-        sfx(games[std::size_t(selected_)].favourite ? Sound::LaunchGame : Sound::MovingTab);
+        /* Options - start - plays it, straight in. */
+        sfx(Sound::LaunchGame);
+        return start_game(&games[std::size_t(selected_)], "", false, true);
     }
     return Action::None;
 }
@@ -362,7 +363,7 @@ void App::draw_sc_header(const std::string &title, double time)
     draw_glass_cube(88, kBarCy, 44, 0.7f + t * 0.6f, 0.55f + 0.1f * std::sin(t * 0.5f), 0.15f, rgba(0x4A50F0, 0.55f),
                     rgba(0xB4A8FF), nullptr, 1.0f, true);
     g.text_mid(Font::ExtraBold, ts(42), 140, kBarCy, kWhite, Align::Left, title);
-    g.text_mid(Font::SemiBold, ts(27), 1866, kBarCy, kWhite, Align::Right, clock_text());
+    /* (The time and the controllers: the island, draw_starcube.) */
     g.panel(60, kBarCy + 46, 1800, 1.6f, rgba(0x6D6AF0, 0.35f), 1, 0);
 }
 
@@ -385,6 +386,7 @@ void App::draw_sc_home(double time, float zoom)
     if (alpha <= 0.002f)
         return;
     draw_sc_drift(time, alpha, out);
+    draw_wordmark(48, kBarCy, 76, alpha, 0); /* Porpoise's wordmark, as in every look */
 
     /* Coming in (the entrance): it flies in from far off, spinning. */
     const float arrive = calm ? 1.0f : sstep(0.0f, 1.0f, intro_fade_);
@@ -595,8 +597,8 @@ void App::draw_sc_home(double time, float zoom)
     if (!sub.empty())
         g.text_mid(Font::SemiBold, ts(27), 960 + 18.0f * pulse, 944, with_alpha(kLavender, 0.3f + 0.7f * cap),
                    Align::Center, sub);
-    g.text_mid(Font::SemiBold, ts(27), 1866, kBarCy, kWhite, Align::Right, clock_text());
-    draw_prompts({{Glyph::DPad, "Choose"}, {Glyph::Cross, "Confirm"}}, {}, "");
+    /* (The time and the controllers: the island, draw_starcube.) */
+    draw_prompts({{Glyph::DPad, "Choose"}, {Glyph::Cross, "Confirm"}}, {{Glyph::Triangle, "Menu"}}, "");
 }
 
 /* ---- games -------------------------------------------------------------------------------- */
@@ -644,7 +646,7 @@ void App::draw_sc_games(double time)
             Game *game = &games[std::size_t(i)];
             if (discs)
             {
-                const float d = focused ? 236.0f : 200.0f;
+                const float d = (focused ? 236.0f : 200.0f) * (game->platform == "Wii" ? 1.0f : 0.84f); /* (GameCube: smaller) */
                 draw_disc(game, cx, cy - 16, d * (0.7f + 0.3f * in),
                           spin * (focused ? 1.2f : 0.25f) + float(i) * 0.7f + (1.0f - in) * 3.0f, 0, edge * in, focused);
             }
@@ -670,7 +672,7 @@ void App::draw_sc_games(double time)
     std::snprintf(pos, sizeof pos, "%02d / %02d", selected_ + 1, shown);
     g.text_mid(Font::ExtraBold, ts(30), kPageX + kPageW - 32, icy, kSoft, Align::Right, pos);
     draw_prompts({{Glyph::DPad, "Browse"}, {Glyph::Cross, "Open"}, {Glyph::Circle, "Back"}},
-                 {{Glyph::Options, "Favorite"}, {Glyph::Triangle, "Sort & Filter"}}, "");
+                 {{Glyph::Triangle, "Menu"}}, "");
 }
 
 /* A game's own page: its disc (or box) turning on the left, what you can
@@ -686,7 +688,8 @@ void App::draw_sc_details(double time)
     const float spin = settings_->reduced_motion ? 0.0f : float(time) * 0.5f;
     const float in = 1.0f - flip_anim_;
     if (settings_->sc_games == 0)
-        draw_disc(&game, 500, 520, 470 * (0.85f + 0.15f * in), spin, 0.10f, 1.0f, false);
+        draw_disc(&game, 500, 520, 470 * (game.platform == "Wii" ? 1.0f : 0.80f) * (0.85f + 0.15f * in), spin, 0.10f,
+                  1.0f, false); /* (a GameCube disc, the smaller one) */
     else
         draw_tile(&game, 500, 520, 340, 476, (1.0f - in) * 1.2f + std::sin(float(time) * 0.6f) * 0.08f, 1.0f, true,
                   false);
@@ -717,9 +720,9 @@ void App::draw_sc_details(double time)
             g.text_mid(Font::SemiBold, ts(22), rx + rw - 30, y + h * 0.5f, kCyan, Align::Right,
                        plural(details_shots_, "1 screenshot", "{n} screenshots"));
     }
-    if (screen_ != Screen::States)
+    if (screen_ != Screen::States && screen_ != Screen::Main) /* (Main: the page closing) */
     {
-        std::vector<std::pair<Glyph, std::string>> right = {{kKeyL2R2, "Other Games"}, {Glyph::Options, "Favorite"}};
+        std::vector<std::pair<Glyph, std::string>> right = {{kKeyL2R2, "Other Games"}};
         if (details_achievements(game).valid())
             right.insert(right.begin() + 1, {Glyph::Square, "Achievements"});
         draw_prompts({{Glyph::DPad, "Browse"}, {Glyph::Cross, "Confirm"}, {Glyph::Circle, "Back"}}, right, "");
@@ -940,6 +943,17 @@ void App::draw_starcube(double time)
             {
             case Tab::Library:
                 draw_sc_games(time);
+                if (gl_back_ > 0.001f && screen_ == Screen::Main && lib_->shown() > 0)
+                {
+                    /* Back from a game's page: it fades and its disc settles away. */
+                    const float u = 1.0f - gl_back_, k = u * u * (3.0f - 2.0f * u);
+                    const float flip = flip_anim_;
+                    flip_anim_ = k;
+                    g.set_layer(dx, dy, fade * (1.0f - k));
+                    draw_sc_details(time);
+                    flip_anim_ = flip;
+                    g.set_layer(dx, dy, fade);
+                }
                 if (screen_ == Screen::Sort)
                     draw_sort();
                 break;
@@ -952,7 +966,11 @@ void App::draw_starcube(double time)
             }
     }
     g.set_layer();
+    g.set_tone(false);
+    draw_island(3); /* 4.5: the island, top right */
+    draw_side_menu();
     draw_dialog();
+    draw_ctl_toasts();
     draw_update_overlay(time);
     g.set_intro(1, 0);
     draw_theme_overlay();

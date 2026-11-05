@@ -27,7 +27,7 @@ namespace porpoise::sound
 {
 namespace
 {
-constexpr std::size_t kQueueTarget = 2400; /* 48 kHz frames: 50 ms */
+constexpr std::size_t kQueueTarget = 3600; /* 48 kHz frames: 75 ms (a slow frame doesn't run it dry) */
 constexpr int kVoices = 8;
 
 struct Clip
@@ -39,13 +39,19 @@ struct Voice
 {
     int clip = -1;
     std::size_t at = 0; /* frame */
+    float gain = 1, fade = 0; /* fade: taken off the gain each frame (stop) */
 };
 
 Clip g_clips[int(Effect::Count)];
 Clip g_own[int(Effect::Count)]; /* the WAVs, kept for use_own_effects */
 Voice g_voices[kVoices];
-std::vector<unsigned char> g_music_file;
+/* The two loops: 0 Porpoise's original (the legacy looks), 1 Soundscape (the new
+ * look). g_music is the one playing; a change fades it out, then in. */
+std::vector<unsigned char> g_music_files[2];
+stb_vorbis *g_musics[2] = {nullptr, nullptr};
 stb_vorbis *g_music = nullptr;
+int g_track = 0, g_track_want = 0;
+float g_switch = 1.0f; /* the change's own fade */
 bool g_music_on = true, g_effects_on = true;
 float g_music_volume = 0.3f, g_effects_volume = 0.8f;
 float g_fade = 0.0f, g_fade_to = 1.0f, g_fade_step = 1.0f / 90.0f; /* per frame */
@@ -67,6 +73,32 @@ bool read_file(const std::string &path, std::vector<unsigned char> &out)
     const bool ok = n > 0 && std::fread(out.data(), 1, out.size(), f) == out.size();
     std::fclose(f);
     return ok;
+}
+
+/* A short Ogg Vorbis clip, 48 kHz stereo, decoded whole. */
+bool load_ogg(const std::string &path, Clip &clip)
+{
+    std::vector<unsigned char> b;
+    if (!read_file(path, b))
+        return false;
+    int error = 0;
+    stb_vorbis *v = stb_vorbis_open_memory(b.data(), int(b.size()), &error, nullptr);
+    if (!v)
+        return false;
+    const stb_vorbis_info info = stb_vorbis_get_info(v);
+    if (info.sample_rate == 48000 && info.channels == 2)
+    {
+        std::int16_t buf[4096];
+        for (;;)
+        {
+            const int n = stb_vorbis_get_samples_short_interleaved(v, 2, buf, 4096);
+            if (n <= 0)
+                break;
+            clip.frames.insert(clip.frames.end(), buf, buf + n * 2);
+        }
+    }
+    stb_vorbis_close(v);
+    return !clip.frames.empty();
 }
 
 /* A 16-bit stereo PCM WAV, any header layout. */
@@ -108,37 +140,61 @@ bool load_wav(const std::string &path, Clip &clip)
 
 bool load(const std::string &asset_dir)
 {
-    static const char *const names[int(Effect::Count)] = {"game-row", "menu-scroll", "moving-tab", "details-flip",
-                                                          "launch-game"};
+    static const char *const names[int(Effect::Count)] = {"game-row",   "menu-scroll", "moving-tab", "details-flip",
+                                                          "launch-game", "boot-sonar", "boot-sonar-legacy"};
     int ok = 0;
     for (int i = 0; i < int(Effect::Count); ++i)
     {
-        ok += load_wav(asset_dir + "/sounds/" + names[i] + ".wav", g_clips[i]) ? 1 : 0;
+        /* (the boot's sound is an Ogg file: small) */
+        ok += i >= int(Effect::BootSonar) ? (load_ogg(asset_dir + "/sounds/" + names[i] + ".ogg", g_clips[i]) ? 1 : 0)
+                                          : (load_wav(asset_dir + "/sounds/" + names[i] + ".wav", g_clips[i]) ? 1 : 0);
         g_own[i] = g_clips[i];
     }
-    if (read_file(asset_dir + "/sounds/menu-music.ogg", g_music_file))
-    {
-        int error = 0;
-        g_music = stb_vorbis_open_memory(g_music_file.data(), int(g_music_file.size()), &error, nullptr);
-        if (g_music)
+    static const char *const tracks[2] = {"/sounds/menu-music.ogg", "/sounds/menu-music-soundscape.ogg"};
+    for (int t = 0; t < 2; ++t)
+        if (read_file(asset_dir + tracks[t], g_music_files[t]))
         {
-            const stb_vorbis_info info = stb_vorbis_get_info(g_music);
-            if (info.sample_rate != 48000 || info.channels != 2)
+            int error = 0;
+            stb_vorbis *v = stb_vorbis_open_memory(g_music_files[t].data(), int(g_music_files[t].size()), &error, nullptr);
+            if (v)
             {
-                stb_vorbis_close(g_music); /* the mix is 48 kHz stereo; anything else is left out */
-                g_music = nullptr;
+                const stb_vorbis_info info = stb_vorbis_get_info(v);
+                if (info.sample_rate != 48000 || info.channels != 2)
+                {
+                    stb_vorbis_close(v); /* the mix is 48 kHz stereo; anything else is left out */
+                    v = nullptr;
+                }
             }
+            g_musics[t] = v;
         }
-    }
+    g_track = g_track_want;
+    g_music = g_musics[g_track] ? g_musics[g_track] : g_musics[0];
     ps5::debug::mark_value("sound: effects loaded", ok);
     ps5::debug::mark(g_music ? "sound: menu music ready" : "sound: no menu music");
     g_loaded = true;
     return ok > 0 || g_music;
 }
 
+static bool is_boot(int clip)
+{
+    return clip == int(Effect::BootSonar) || clip == int(Effect::BootSonarLegacy);
+}
+
+/* The boot's hum is heard at the sounds' volume, or with the sounds off, the
+ * music's (it rises into the music). */
+static float boot_gain()
+{
+    return g_effects_on && g_effects_volume > 0.0f ? g_effects_volume : g_music_on ? g_music_volume : 0.0f;
+}
+
 void play(Effect e)
 {
-    if (!g_loaded || !g_effects_on || g_effects_volume <= 0.0f || g_clips[int(e)].frames.empty())
+    if (!g_loaded || g_clips[int(e)].frames.empty())
+    {
+        ps5::debug::mark_value("sound: an effect not loaded, number", int(e));
+        return;
+    }
+    if (is_boot(int(e)) ? boot_gain() <= 0.0f : (!g_effects_on || g_effects_volume <= 0.0f))
         return;
     /* The same effect again within 40 ms restarts it instead of stacking. */
     for (Voice &v : g_voices)
@@ -163,6 +219,15 @@ void play(Effect e)
     }
     slot->clip = int(e);
     slot->at = 0;
+    slot->gain = 1;
+    slot->fade = 0;
+}
+
+void stop(Effect e)
+{
+    for (Voice &v : g_voices)
+        if (v.clip == int(e))
+            v.fade = 1.0f / (0.25f * 48000.0f); /* a quarter of a second */
 }
 
 void set_effect(Effect e, const std::vector<std::int16_t> &frames)
@@ -185,6 +250,11 @@ void set_music(bool on, float volume)
 {
     g_music_on = on;
     g_music_volume = std::clamp(volume, 0.0f, 1.0f);
+}
+
+void set_music_track(int track)
+{
+    g_track_want = std::clamp(track, 0, 1);
 }
 
 void set_effects(bool on, float volume)
@@ -215,8 +285,6 @@ void pump()
 {
     if (!g_loaded)
         return;
-    if (std::fabs(porpoise::audio::source_rate() - 48000.0) > 1.0)
-        porpoise::audio::set_source_rate(48000.0);
     /* The fade moves once a frame. */
     if (g_fade < g_fade_to)
         g_fade = std::min(g_fade_to, g_fade + g_fade_step);
@@ -226,7 +294,7 @@ void pump()
     const std::size_t queued = porpoise::audio::queued();
     if (queued >= kQueueTarget)
         return;
-    const std::size_t n = std::min<std::size_t>(kQueueTarget - queued, 4800);
+    const std::size_t n = std::min<std::size_t>(kQueueTarget - queued, 7200);
     static std::vector<float> mix;
     static std::vector<std::int16_t> pcm, music;
     mix.assign(n * 2, 0.0f);
@@ -235,7 +303,25 @@ void pump()
      * volume setting stays usable. */
     const bool jingle = g_jingle_at < g_jingle.size() / 2;
     g_duck = jingle ? std::max(0.2f, g_duck - 0.05f) : std::min(1.0f, g_duck + 0.02f);
-    const float music_gain = g_music_on ? g_music_volume * g_music_volume * g_fade * g_duck : 0.0f;
+    /* Another loop asked for (the look changed): this one fades out, the other
+     * comes in from its start. */
+    if (g_track_want != g_track)
+    {
+        g_switch = std::max(0.0f, g_switch - 1.0f / 24.0f);
+        if (g_switch <= 0.0f)
+        {
+            g_track = g_track_want;
+            if (g_musics[g_track])
+            {
+                g_music = g_musics[g_track];
+                stb_vorbis_seek_start(g_music);
+            }
+        }
+    }
+    else
+        g_switch = std::min(1.0f, g_switch + 1.0f / 45.0f);
+    const float music_gain =
+        g_music_on ? g_music_volume * g_music_volume * g_fade * g_duck * g_switch * g_switch : 0.0f;
     if (g_music && music_gain > 0.0005f)
     {
         music.resize(n * 2);
@@ -261,11 +347,17 @@ void pump()
             continue;
         const auto &f = g_clips[v.clip].frames;
         const std::size_t total = f.size() / 2;
+        const float gain = is_boot(v.clip) ? boot_gain() : fx_gain;
         std::size_t i = 0;
         for (; i < n && v.at < total; ++i, ++v.at)
         {
-            mix[i * 2] += f[v.at * 2] * fx_gain;
-            mix[i * 2 + 1] += f[v.at * 2 + 1] * fx_gain;
+            if (v.fade > 0 && (v.gain -= v.fade) <= 0)
+            {
+                v.at = total;
+                break;
+            }
+            mix[i * 2] += f[v.at * 2] * gain * v.gain;
+            mix[i * 2 + 1] += f[v.at * 2 + 1] * gain * v.gain;
         }
         if (v.at >= total)
             v.clip = -1;
@@ -284,6 +376,6 @@ void pump()
     pcm.resize(n * 2);
     for (std::size_t i = 0; i < n * 2; ++i)
         pcm[i] = static_cast<std::int16_t>(std::clamp(mix[i], -32768.0f, 32767.0f));
-    porpoise::audio::push(pcm.data(), n);
+    porpoise::audio::push_direct(pcm.data(), n);
 }
 } // namespace porpoise::sound

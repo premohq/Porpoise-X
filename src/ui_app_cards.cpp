@@ -223,7 +223,7 @@ void App::draw_saves_by_game(double time)
     }
     const float view_h = bottom - top;
     const float target = std::clamp(focus_y - view_h * 0.4f, 0.0f, std::max(0.0f, y - view_h));
-    mc_game_scroll_ = settings_->reduced_motion ? target : mc_game_scroll_ + (target - mc_game_scroll_) * 0.25f;
+    mc_game_scroll_ = settings_->reduced_motion ? target : smooth(mc_game_scroll_, target, ui_dt_, 17.3f); /* (a quarter of the way a 60th of a second) */
 
     y = top - mc_game_scroll_;
     idx = 0;

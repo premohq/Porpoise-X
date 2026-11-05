@@ -49,10 +49,22 @@ struct Fusion
     bool started = false;
     float age = 0;              /* seconds since it started */
     float still = 0;            /* seconds it has lain still */
+    /* The PlayStation Move (Oct 24): its gyroscope reads ~0.09 rad/s at rest,
+     * over the DualSense's "still" mark, so its drift was never learnt and
+     * the pointer wandered ~1.5 degrees a second. For it, still is steady
+     * (the readings not changing), whatever they read, and gravity's
+     * corrections teach the drift too. */
+    bool steady = false;
+    float win_t = 0, win_s[3] = {0, 0, 0}, win_q[3] = {0, 0, 0}, win_g = 0, win_gq = 0; /* (steady) */
+    int win_n = 0;
+    bool learnt = false; /* a drift learnt since it started */
 };
 
 /* One reading: rad/s and g in the DualSense's axes, dt seconds since the last. */
 void fuse(Fusion &f, const float gyro[3], const float accel[3], float dt);
+/* Turns the controller's whole world about up by a (radians; + counterclockwise
+ * seen from above): its yaw taken back where the camera says it drifted. */
+void turn_world(Fusion &f, float a);
 
 /* Where the Remote points, radians: yaw + to the right, pitch + up (both
  * against gravity, yaw from the world's arbitrary zero), roll about the

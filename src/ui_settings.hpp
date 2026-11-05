@@ -43,6 +43,17 @@ struct Settings
      * saturation, contrast and warmth 0..10, 5 as the game has it. */
     int bloom = 0;
     int color_saturation = 5, color_contrast = 5, color_warmth = 5;
+    /* 4.5: the picture cropped at each edge, in half percents of its size
+     * (0..20: up to 10%): black bars a game draws, or what it shows off the
+     * edge of an old TV. */
+    int crop_left = 0, crop_right = 0, crop_top = 0, crop_bottom = 0;
+    void crop(float out[4]) const
+    {
+        out[0] = float(crop_left) * 0.005f;
+        out[1] = float(crop_top) * 0.005f;
+        out[2] = float(crop_right) * 0.005f;
+        out[3] = float(crop_bottom) * 0.005f;
+    }
     bool enh_advanced = false; /* Enhancements shows every option, not just the everyday ones */
     /* The values porpoise::vk::set_picture_adjust takes. */
     void picture_adjust(float out[4]) const
@@ -57,6 +68,7 @@ struct Settings
     std::string online_dns;  /* Wii games online: the DNS server to ask ("" the console's own; global only) */
     bool fps_overlay = false;
     int output_res = 0;           /* the picture sent to the TV: 0 the PS5's own, 1 1080p, 2 1440p, 3 4K (next start) */
+    int refresh_mode = 0;         /* 0 fixed 120 Hz (the PS5's VRR off for Porpoise), 1 VRR (next start) */
     bool vsync = true;            /* frames on the TV's own vblank (porpoise_pacer); off: Porpoise's timer */
     /* 3.1: frame generation (beta): in-between frames from the game's own
      * (porpoise_framegen). Steady 30 takes the game's frames 30 a second at
@@ -252,6 +264,18 @@ struct Settings
     bool wii_motion = true; /* the DualSense's motion is the Remote's */
     bool wii_shake = true;  /* a flick shakes the Remote */
     int wii_motion_plus = 0; /* Wii MotionPlus: Auto (the games that need one), On, Off */
+    bool wii_move = false;  /* Move test builds: a PlayStation Move is player 1's Remote */
+    bool ps3_eye = false;   /* the PS3 Eye is looked for (it can be plugged in at any time) */
+    int move_color = 0;     /* the Move's ball color: porpoise::move::ball_name (the PS3 Eye looks for it) */
+    int wii_nunchuk_hand = 0; /* with the Move: the DualSense (the Nunchuk) in the left hand (0) or the right (1) */
+    bool wii_nav = false;     /* with the Move: the Nunchuk is a Navigation controller (Move Studio, alpha) */
+    /* 4.5 Beta 4: players 2 to 4 in Wii games, kept for every game. What each
+     * holds (porpoise::pad::WiiHolding: 0 their DualSense, 1 a Move, 2 a Move and a
+     * Navigation controller, 3 a Move and their DualSense), and what a DualSense
+     * plays as (0 the same as player 1's, else the WiiController + 1). */
+    int wii_p2_hold = 0, wii_p3_hold = 0, wii_p4_hold = 0;
+    int wii_p2_as = 0, wii_p3_as = 0, wii_p4_as = 0;
+    int wii_swing = 70;     /* how hard the Move's swings come out, percent (light swings went too far) */
     bool wii_invert_x = false, wii_invert_y = false;
     /* The Wii Remote setup: the screen's half-width and half-height as angles
      * from where the player sits, in tenths of a degree (0: not measured); and
@@ -274,6 +298,7 @@ struct Settings
         bool used = false;
         int name = 0; /* index into wii_preset_names() */
         int controller = 0, grip = 0, pointer = 0, speed = 5, screen_x = 0, screen_y = 0, smooth = 1, reach = 100;
+        int move = 0, swing = 70; /* the PlayStation Move as the Remote; its swing strength */
     };
     WiiPreset wii_presets[kWiiPresets];
     int wii_preset = 0; /* the one in use: 0 none, 1..4 */
@@ -290,6 +315,10 @@ struct Settings
     bool beta_updates = false; /* Updates offer pre-releases too (a beta build always does) */
     bool perf_profile = false; /* the sampling profiler (/app0/ps5-sampler.txt) from the next start */
     bool setup_checked = false; /* the first-start setup check has been shown */
+    bool welcome_45 = false;
+    bool hide_duplicates = false;
+    bool auto_picks = true; /* 4.6: Porpoise's Picks applied to a game the first time (unless the player changed it) */
+    bool menu_haptics = true; /* 4.5: light ticks on the controller moving through the menus */ /* a game kept in two formats shown once (Library::set_hide_duplicates) */    /* 4.5's welcome (a look to use) has been shown */
     bool motion_logs = true; /* a CSV of the controller's motion per Wii game (developer options) */
     /* System */
     int cpu_clock = 5;       /* index into the clock list (50% .. 300%): 100% */
@@ -306,7 +335,9 @@ struct Settings
     bool reduced_motion = false;
     bool large_text = false; /* 2.0's Larger text: read once into text_size */
     int loaded_version = 0; /* settings.ini's settings_version when read (not saved): for one-time changes */
-    int ui_theme = 0;  /* the theme: porpoise::ui::ThemeId (0 Porpoise, 1 Revolution, ...) */
+    int ui_theme = 19; /* the theme: porpoise::ui::ThemeId (19 Porpoise, 0 Porpoise Classic, 1 Revolution, ...) */
+    int ui_mode = 2;   /* Porpoise's mode: 0 dark, 1 OLED black, 2 light (the default) */
+    int glass_layout = 0; /* Porpoise's library: 0 cover flow, 1 rows */
     int ui_palette = 0; /* the theme's colours: 0 its own, n palette n - 1 (ui_theme.hpp) */
     int ui_font = 0;    /* the menus' font: 0 the theme's own, n font_set(n - 1) */
     int lib_view = 0;   /* the library: 0 cover flow, 1 wheel, 2 disc flow, 3 shelf, 4 box, 5 list, 6 stack,

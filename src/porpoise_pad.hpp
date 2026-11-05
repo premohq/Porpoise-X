@@ -159,6 +159,17 @@ enum WiiController : int
     WiiGameCube = 5,      /* a GameCube controller in a Wii game that takes one (Brawl, Mario Kart Wii) */
     WiiControllerCount,
 };
+/* 4.5 Beta 4: what players 2 to 4 hold (player 1's is WiiConfig::move,
+ * navigation and controller, as before). A Move for players 2 to 4 comes from
+ * REXCRAFT88's Move Management (the PS5 itself reads one Move: player 1's). */
+enum WiiHolding : int
+{
+    HoldDualSense = 0,     /* their DualSense, as their Wii controller (WiiConfig::as) */
+    HoldMove = 1,          /* a Move, as the Remote */
+    HoldMoveNav = 2,       /* a Move and a Navigation controller, as the Remote and the Nunchuk */
+    HoldMoveDualSense = 3, /* a Move, and their DualSense as the Nunchuk */
+    HoldCount,
+};
 /* Where the Remote's pointer comes from. */
 enum WiiPointer : int
 {
@@ -250,7 +261,31 @@ struct WiiConfig
     /* Porpoise's own home screen points with it (the Revolution look): R1 and
      * L1 stay menu buttons, centre_now() centres. */
     bool menu = false;
+    /* Move test builds: a PlayStation Move is player 1's Remote (its motion the
+     * pointer's, measured by the Wii Remote Setup); the DualSense the Nunchuk. */
+    bool move = false;
+    /* With the Move: the DualSense (the Nunchuk) held in the right hand, the
+     * Move in the left. Its right stick is the Nunchuk's, R1 / R2 are C / Z,
+     * and the face buttons the D-pad (the right hand has none). */
+    bool nunchuk_right = false;
+    /* With the Move: the Nunchuk is a Navigation controller, from REXCRAFT88's
+     * Move Management. The DualSense still works alongside. */
+    bool navigation = false;
+    /* How hard the Move's swings come out, percent of how hard they were (its
+     * motion as the game feels it, gravity kept: tilting is unchanged). */
+    int swing = 100;
+    /* Players 2 to 4 (index 1..3; [0] isn't used): what each holds
+     * (WiiHolding), and what their DualSense plays as (a WiiController, or
+     * -1 the same as player 1's). Everything else - the pointer's speed,
+     * steadiness, swing strength - is player 1's for everyone. */
+    int hold[kMaxPlayers] = {0, 0, 0, 0};
+    int as[kMaxPlayers] = {-1, -1, -1, -1};
 };
+/* One player's own set-up: player 1's is config itself; players 2 to 4 take
+ * player 1's and put their own controller in. With two controllers (player 1's
+ * Remote and Nunchuk on two DualSense) player 2's DualSense is player 1's
+ * Nunchuk: player 2 gets player 1's set-up, as before. */
+WiiConfig for_player(const WiiConfig &config, int player);
 void set_wii(const WiiConfig &config);
 /* The player's own Wii buttons: for each of the four sets (wii_button_set),
  * the control that does what Porpoise's layout puts on control i. */
@@ -324,6 +359,8 @@ struct State
     std::int16_t l2 = 0, r2 = 0; /* the GameCube L and R analog, 0..0x7fff */
     /* Raw buttons this poll, for Porpoise's own shortcuts and screens. */
     bool ps_menu_combo = false; /* Options + touch pad: open the Porpoise menu */
+    bool move = false;          /* player 1 is the PlayStation Move */
+    unsigned move_holds = 0;    /* times the Move's Start has been held (a second): the in-game menu, the pointer */
     bool ff_step = false;       /* touch pad + R1 pressed: fast forward's next speed */
     bool ff_hold = false;       /* touch pad + R2 held: fast forward while held */
     bool quick_save = false;    /* touch pad + L1 pressed: save to the quick slot (set_quick_buttons) */
@@ -350,6 +387,8 @@ bool open();
 void close();
 void set_mapping(const Mapping &mapping);
 void set_rumble_enabled(bool enabled);
+/* 4.5: a light tick on player 1's controller for the menus (level 0..255, for ms). */
+void menu_tick(std::uint8_t level, int ms = 28);
 /* Touch pad + R1 / R2 for fast forward in games (Settings > Controls). Off:
  * the touch pad, R1 and R2 go to the game as they are. */
 void set_fast_forward_buttons(bool enabled);
@@ -375,6 +414,17 @@ const State &state(int player = 0);
 /* A copy taken under the lock, for the core's own thread. */
 State snapshot(int player);
 bool connected(int player);
+/* A player is here to play: their DualSense, or (4.5 Beta 4) the Move they
+ * hold in a Wii game. */
+/* The Controller Hub is showing the players: call every frame it's open (players
+ * 2 to 4's Moves are listened to outside Wii games while it is). */
+void watching_players();
+bool playing(int player);
+/* What a player's Move is doing (4.5 Beta 4): 0 not set up, 1 waiting for it,
+ * 2 the PS5's own (player 1's), 3 from Move Management. And their Navigation
+ * controller: 0 not set up, 1 waiting, 2 here. */
+int move_link(int player);
+int nav_link(int player);
 /* The PS5 user holding player's controller (-1 none): for its speaker. */
 std::int32_t user_of(int player);
 int connected_count();

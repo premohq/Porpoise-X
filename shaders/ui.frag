@@ -55,6 +55,7 @@ const int BG_PIXEL = 14;    /* 8-Bit: a pixel-art night, hills and clouds drifti
 const int BG_BEIGE = 15;    /* Beige: a home computer's warm plastic */
 const int BG_CLEAR = 16;    /* Translucent: see-through colored plastic, its insides showing */
 const int BG_ARCADE = 17;   /* Arcade: cabinets glowing along the wall, a carpet that glows */
+const int BG_AMBIENT = 18;  /* Porpoise (4.1): a dark room lit by the chosen game's own colours */
 
 float sdRoundBox(vec2 p, vec2 b, float r)
 {
@@ -721,6 +722,55 @@ vec3 arcade(vec2 uv)
     return col;
 }
 
+/* Porpoise (4.1): the room takes the light of the game you're on. Its two
+ * colours (look0, look1: from the cover, eased as you move) glow from above
+ * and from the sides; look0.w is the mode: 0 dark, 1 OLED black, 2 light. */
+vec3 ambient(vec2 uv)
+{
+    float t = now();
+    float mode = pc.look0.w;
+    float aspect = pc.screen.x / max(pc.screen.y, 1.0);
+    vec2 p = vec2(uv.x * aspect, uv.y);
+    vec3 a = pc.look0.rgb, b = pc.look1.rgb;
+    /* The glows drift a little, slowly, like light through water. */
+    vec2 c1 = vec2(0.5 * aspect + 0.10 * sin(t * 0.050), 0.10 + 0.04 * cos(t * 0.043));
+    vec2 c2 = vec2(0.10 * aspect + 0.06 * cos(t * 0.037), 0.92 + 0.05 * sin(t * 0.031));
+    vec2 c3 = vec2(0.92 * aspect + 0.05 * sin(t * 0.029), 0.70 + 0.06 * cos(t * 0.041));
+    vec2 d1 = (p - c1) / vec2(0.95, 0.62), d2 = (p - c2) / vec2(0.70, 0.55), d3 = (p - c3) / vec2(0.62, 0.50);
+    float g1 = exp(-dot(d1, d1) * 1.6), g2 = exp(-dot(d2, d2) * 1.8), g3 = exp(-dot(d3, d3) * 1.9);
+    vec3 col;
+    if (mode > 1.5)
+    {
+        /* Light: clean frosted white - a touch brighter at the top - and the
+         * game's colours only a breath along the bottom, where the cases
+         * stand. (A wash across the top looked smudged.) */
+        vec3 base = mix(vec3(0.952, 0.958, 0.968), vec3(0.918, 0.926, 0.942), smoothstep(0.0, 1.0, uv.y));
+        col = base;
+        float low = smoothstep(0.40, 1.0, uv.y);
+        vec2 d4 = (p - vec2(0.5 * aspect, 1.05)) / vec2(1.10, 0.42);
+        float g4 = exp(-dot(d4, d4) * 1.5);
+        col = mix(col, mix(base, a, 0.32), g4 * 0.20);
+        col = mix(col, mix(base, b, 0.28), g2 * 0.14 * low);
+        col = mix(col, mix(base, a, 0.26), g3 * 0.10 * low);
+    }
+    else if (mode > 0.5)
+        return vec3(0.0); /* OLED Black: black, nothing lit, for a TV whose black is off */
+    else
+    {
+        /* Dark: a room of its own - deep slate, a little lighter up top - and
+         * the game's colours as accents only: a soft light low behind the
+         * cases and a breath in the corners (they filled the screen). */
+        vec3 base = mix(vec3(0.050, 0.056, 0.072), vec3(0.016, 0.018, 0.026), smoothstep(0.0, 1.0, uv.y));
+        vec2 d5 = (p - vec2(0.5 * aspect, 0.86)) / vec2(0.85, 0.30);
+        float g5 = exp(-dot(d5, d5) * 1.6);
+        col = base + a * g5 * 0.20 + a * g1 * 0.07 + b * g2 * 0.12 + a * g3 * 0.08;
+    }
+    vec2 vc = uv - 0.5;
+    col *= 1.0 - dot(vc, vc) * (mode > 1.5 ? 0.10 : 0.45);
+    col += (hash(floor(uv * pc.screen.xy)) - 0.5) * 0.008; /* grain: no banding in the glow */
+    return max(col, vec3(0.0));
+}
+
 vec3 background_at(vec2 uv)
 {
     int kind = int(pc.extra.y + 0.5);
@@ -759,9 +809,14 @@ vec3 background_at(vec2 uv)
         col = clear_plastic(uv);
     else if (kind == BG_ARCADE)
         col = arcade(uv);
+    else if (kind == BG_AMBIENT)
+        col = ambient(uv);
     else
         col = room(uv);
-    /* Dim darkens for the launch screen. */
+    /* Dim darkens for the launch screen (not the Porpoise look's Light: its
+     * room stays white - dimmed, it went grey while the game loaded). */
+    if (kind == BG_AMBIENT && pc.look0.w > 1.5)
+        return col;
     return col * (1.0 - pc.screen.w * 0.65);
 }
 
@@ -997,6 +1052,79 @@ vec4 liquid_panel(vec2 p, vec2 shape, vec2 quad)
     return c;
 }
 
+/* Porpoise's glass (panel_style 2): thin and quiet. A frosting of the room
+ * behind, a hairline edge, a highlight along the top inside edge, a soft sheen
+ * across, and a soft shadow under it - no thick rim. */
+/* over: drawn over a picture (the game, paused), not the room: smoky glass
+ * that lets a little of the picture through instead of the room's frosting. */
+vec4 frost_panel(vec2 p, vec2 shape, bool over)
+{
+    float r = v_p0.y;
+    vec2 b = shape * 0.5;
+    float d = sdRoundBox(p, b, r);
+    float inside = coverage(d);
+    float fill_a = v_color.a;
+    bool light = pc.look0.w > 1.5;
+    /* Its shadow: like 0 16px 40px rgba(0,0,0,.3), less on light. */
+    float drop = min(shape.y * 0.22, 16.0);
+    float ds = sdRoundBox(p - vec2(0.0, drop), b - vec2(2.0), r);
+    float spread = clamp(min(shape.x, shape.y) * 0.45, 10.0, 40.0);
+    float sh = exp(-pow(max(ds, 0.0) / spread, 2.0) * 1.6) * (1.0 - inside);
+    sh *= (light ? 0.10 : 0.30) * clamp(fill_a * 4.0, 0.25, 1.0) *
+          mix(0.45, 1.0, smoothstep(50.0, 220.0, max(shape.x, shape.y)));
+
+    /* The room through it, bent a hair at the very edge. */
+    vec2 res = pc.screen.xy;
+    vec2 suv = gl_FragCoord.xy / res;
+    vec2 inner = clamp(p, -(b - r), b - r);
+    vec2 n = p - inner;
+    float nl = length(n);
+    n = nl > 1e-3 ? n / nl : vec2(0.0, -1.0);
+    float edge = clamp(1.0 + d / 6.0, 0.0, 1.0);
+    vec2 bend = -n * vec2(res.y / res.x, 1.0) * edge * edge * 5.0 / res.y;
+    vec3 behind = over ? (light ? vec3(0.93, 0.94, 0.96) : vec3(0.035, 0.04, 0.055)) : background_at(suv + bend);
+    float yn = clamp(p.y / shape.y + 0.5, 0.0, 1.0);
+    float xn = clamp(p.x / shape.x + 0.5, 0.0, 1.0);
+    /* Dark and OLED: every fill is frost, as much as it is bright (a screen's
+     * dark navy glass a faint frosting, its blue highlight a bright one), and
+     * black stays black (shadows, dimming). Light: the colour as given. */
+    float lum = dot(v_color.rgb, vec3(0.30, 0.55, 0.15));
+    vec3 body;
+    if (light)
+        body = mix(behind, v_color.rgb, fill_a);
+    else if (lum < 0.035)
+        body = mix(behind, v_color.rgb, fill_a);
+    else
+        body = mix(behind, vec3(1.0), clamp(fill_a * (0.12 + 0.88 * lum), 0.0, 0.97));
+    /* A sheen across, from the top left (linear-gradient 118deg). */
+    float across = clamp(1.0 - (xn * 0.55 + yn * 1.0) / 0.62, 0.0, 1.0);
+    body += vec3(1.0) * across * (light ? 0.10 : 0.05);
+    body *= mix(1.04, 0.97, yn);
+    /* The highlight inside the top edge (inset 0 1px 0 rgba(255,255,255,.4)). */
+    float top_line = coverage(abs(d + 1.6) - 0.7) * smoothstep(0.0, -0.8, n.y);
+    body = mix(body, vec3(1.0), top_line * (light ? 0.75 : 0.40));
+    vec4 c = vec4(body, inside * (over ? (lum < 0.035 && !light ? fill_a : (light ? 0.90 : 0.82)) : 0.94));
+    if (v_p0.z > 0.0)
+    {
+        float bline = coverage(abs(d + v_p0.z * 0.5) - v_p0.z * 0.5);
+        c.rgb = mix(c.rgb, v_bcolor.rgb, bline * v_bcolor.a);
+    }
+    if (v_p0.w > 0.0)
+    {
+        float q = max(d, 0.0) / v_p0.w;
+        float g = exp(-q * q * 0.9) * step(0.0, d) * 0.6;
+        c.rgb = mix(v_bcolor.rgb, c.rgb, c.a / max(c.a + g * v_bcolor.a, 1e-4));
+        c.a = max(c.a, g * v_bcolor.a);
+    }
+    float sa = sh * (1.0 - c.a);
+    c.rgb = (c.rgb * c.a) / max(c.a + sa, 1e-4);
+    c.a = c.a + sa;
+    /* How present it is (fading in or out, its layer's fade): the frosting is
+     * opaque by itself, so it popped in whole the moment it was drawn. */
+    c.a *= clamp(v_p2.w, 0.0, 1.0);
+    return c;
+}
+
 /* Full-screen overlays a theme lays over everything. */
 vec4 fx(vec2 uv)
 {
@@ -1103,12 +1231,48 @@ vec4 shade()
     if (kind == K_BLOB)
     {
         vec2 q = p / (shape * 0.5);
-        return vec4(v_color.rgb, v_color.a * exp(-dot(q, q) * 2.2));
+        /* Gone at its quad's edge: no faint rectangle round a big glow. */
+        float k = max(exp(-dot(q, q) * 2.2) - 0.1108, 0.0) / 0.8892;
+        return vec4(v_color.rgb, v_color.a * k);
     }
     if (kind == K_COVER || kind == K_REFLECTION)
     {
         float d = sdRoundBox(p, shape * 0.5, v_p0.y);
-        vec4 c = texture(tex, v_uv) * v_color;
+        /* Drawn smaller than it is (a cover across the room, a case turned
+         * away): a few samples across the pixel, as a mipmap would give, so
+         * its details don't shimmer and its edges don't jag. */
+        vec2 ddx = dFdx(v_uv), ddy = dFdy(v_uv);
+        vec2 ts = vec2(textureSize(tex, 0));
+        float foot = max(length(ddx * ts), length(ddy * ts));
+        /* Smaller than it is: samples spread along the way it's squeezed
+         * most (a case turned edge-on is squeezed one way only), as many as
+         * the squeeze, and two across the other way when that's squeezed
+         * too - a mipmap's job, done here (the console's driver is kept to
+         * single-level pictures). Few were too few for a spine seen edge-on:
+         * it shimmered as the case turned. */
+        vec4 c = texture(tex, v_uv);
+        float fx = length(ddx * ts), fy = length(ddy * ts);
+        vec2 major = fx > fy ? ddx : ddy, minor = fx > fy ? ddy : ddx;
+        float fmaj = max(fx, fy), fmin = min(fx, fy);
+        float spread = smoothstep(1.05, 1.5, fmaj);
+        if (spread > 0.0)
+        {
+            int n = int(clamp(ceil(fmaj), 2.0, 14.0));
+            bool both = fmin > 1.3;
+            vec4 acc = vec4(0.0);
+            for (int i = 0; i < 14; ++i)
+            {
+                if (i >= n)
+                    break;
+                vec2 at = v_uv + major * ((float(i) + 0.5) / float(n) - 0.5);
+                if (both)
+                    acc += 0.5 * (texture(tex, at + 0.25 * minor) + texture(tex, at - 0.25 * minor));
+                else
+                    acc += texture(tex, at);
+            }
+            c = mix(c, acc / float(n), spread);
+        }
+        c *= v_color;
         float a = coverage(d);
         if (kind == K_REFLECTION)
             a *= pow(clamp(1.0 - v_local.y, 0.0, 1.0), 2.2) * mix(1.0, 0.45, calm_k());
@@ -1118,6 +1282,8 @@ vec4 shade()
     /* K_PANEL: rounded rectangle with vertical gradient, sheen, border, glow. */
     if (int(pc.extra.w + 0.5) == 1 && v_color.a > 0.05 && v_p2.z < 0.5)
         return liquid_panel(p, shape, quad);
+    if (int(pc.extra.w + 0.5) >= 2 && v_color.a > 0.02 && v_p2.z < 0.5)
+        return frost_panel(p, shape, int(pc.extra.w + 0.5) == 3);
     float d = sdRoundBox(p, shape * 0.5, v_p0.y);
     float yn = clamp(p.y / shape.y + 0.5, 0.0, 1.0);
     vec3 fill = v_color.rgb * mix(1.0, v_p2.x, yn);

@@ -8,6 +8,7 @@
 #include "ui_settings.hpp"
 
 #include "porpoise_atomic.hpp"
+#include "ui_theme.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -59,6 +60,10 @@ const Field kFields[] = {
     {"color_saturation", &Settings::color_saturation, nullptr, 0, 10},
     {"color_contrast", &Settings::color_contrast, nullptr, 0, 10},
     {"color_warmth", &Settings::color_warmth, nullptr, 0, 10},
+    {"crop_left", &Settings::crop_left, nullptr, 0, 20},
+    {"crop_right", &Settings::crop_right, nullptr, 0, 20},
+    {"crop_top", &Settings::crop_top, nullptr, 0, 20},
+    {"crop_bottom", &Settings::crop_bottom, nullptr, 0, 20},
     {"enh_advanced", nullptr, &Settings::enh_advanced, 0, 1},
     {"fps_overlay", nullptr, &Settings::fps_overlay, 0, 1},
     {"shader_mode", &Settings::shader_mode, nullptr, 0, 3},
@@ -83,6 +88,7 @@ const Field kFields[] = {
     {"fg_log", nullptr, &Settings::fg_log, 0, 1},
     {"fps_detail", nullptr, &Settings::fps_detail, 0, 1},
     {"output_res", &Settings::output_res, nullptr, 0, 3},
+    {"refresh_mode", &Settings::refresh_mode, nullptr, 0, 1},
     {"fast_states", nullptr, &Settings::fast_states, 0, 1},
     {"quick_resume", nullptr, &Settings::quick_resume, 0, 1},
     {"volume", &Settings::volume, nullptr, 0, 10},
@@ -151,6 +157,18 @@ const Field kFields[] = {
     {"wii_motion", nullptr, &Settings::wii_motion, 0, 1},
     {"wii_shake", nullptr, &Settings::wii_shake, 0, 1},
     {"wii_motion_plus", &Settings::wii_motion_plus, nullptr, 0, 2},
+    {"wii_move", nullptr, &Settings::wii_move, 0, 1},
+    {"ps3_eye", nullptr, &Settings::ps3_eye, 0, 1},
+    {"move_color", &Settings::move_color, nullptr, 0, 7},
+    {"wii_swing", &Settings::wii_swing, nullptr, 20, 150},
+    {"wii_nunchuk_hand", &Settings::wii_nunchuk_hand, nullptr, 0, 1},
+    {"wii_nav", nullptr, &Settings::wii_nav, 0, 1},
+    {"wii_p2_hold", &Settings::wii_p2_hold, nullptr, 0, 3},
+    {"wii_p3_hold", &Settings::wii_p3_hold, nullptr, 0, 3},
+    {"wii_p4_hold", &Settings::wii_p4_hold, nullptr, 0, 3},
+    {"wii_p2_as", &Settings::wii_p2_as, nullptr, 0, 6},
+    {"wii_p3_as", &Settings::wii_p3_as, nullptr, 0, 6},
+    {"wii_p4_as", &Settings::wii_p4_as, nullptr, 0, 6},
     {"wii_invert_x", nullptr, &Settings::wii_invert_x, 0, 1},
     {"wii_invert_y", nullptr, &Settings::wii_invert_y, 0, 1},
     {"wii_screen_x", &Settings::wii_screen_x, nullptr, 0, 900},
@@ -165,12 +183,16 @@ const Field kFields[] = {
     {"wii_distance", &Settings::wii_distance, nullptr, 5, 250},
     {"wii_preset", &Settings::wii_preset, nullptr, 0, 4},
     {"motion_readout", nullptr, &Settings::motion_readout, 0, 1},
-    {"debug_logs", nullptr, &Settings::debug_logs, 0, 1},
+    {"debug_log_folder", nullptr, &Settings::debug_logs, 0, 1}, /* (was debug_logs: older builds saved it off) */
     {"developer", nullptr, &Settings::developer, 0, 1},
     {"all_settings", nullptr, &Settings::all_settings, 0, 1},
     {"beta_updates", nullptr, &Settings::beta_updates, 0, 1},
     {"perf_profile", nullptr, &Settings::perf_profile, 0, 1},
     {"setup_checked", nullptr, &Settings::setup_checked, 0, 1},
+    {"welcome_45", nullptr, &Settings::welcome_45, 0, 1},
+    {"hide_duplicates", nullptr, &Settings::hide_duplicates, 0, 1},
+    {"auto_picks", nullptr, &Settings::auto_picks, 0, 1},
+    {"menu_haptics", nullptr, &Settings::menu_haptics, 0, 1},
     {"motion_logs", nullptr, &Settings::motion_logs, 0, 1},
     {"cpu_clock", &Settings::cpu_clock, nullptr, 0, 9},
     {"dual_core", nullptr, &Settings::dual_core, 0, 1},
@@ -184,9 +206,11 @@ const Field kFields[] = {
     {"progressive", nullptr, &Settings::progressive, 0, 1},
     {"reduced_motion", nullptr, &Settings::reduced_motion, 0, 1},
     {"large_text", nullptr, &Settings::large_text, 0, 1},
-    {"ui_theme", &Settings::ui_theme, nullptr, 0, 18},
+    {"ui_theme", &Settings::ui_theme, nullptr, 0, 19},
+    {"ui_mode", &Settings::ui_mode, nullptr, 0, 2},
+    {"glass_layout", &Settings::glass_layout, nullptr, 0, 1},
     {"ui_palette", &Settings::ui_palette, nullptr, 0, 23},
-    {"ui_font", &Settings::ui_font, nullptr, 0, 8},
+    {"ui_font", &Settings::ui_font, nullptr, 0, 9},
     {"lib_view", &Settings::lib_view, nullptr, 0, 9},
     {"recent_dock", nullptr, &Settings::recent_dock, 0, 1},
     {"recent_style", &Settings::recent_style, nullptr, 0, 3},
@@ -355,10 +379,10 @@ bool Settings::load(const std::string &path, bool overlay)
             if (overlay)
                 continue;
             WiiPreset &w = wii_presets[k[9] - '1'];
-            int n[9] = {};
-            const int got = std::sscanf(v.c_str(), "%d %d %d %d %d %d %d %d %d", &n[0], &n[1], &n[2], &n[3], &n[4],
-                                        &n[5], &n[6], &n[7], &n[8]);
-            if (got == 9)
+            int n[11] = {0, 0, 0, 0, 5, 0, 0, 1, 100, 0, 70};
+            const int got = std::sscanf(v.c_str(), "%d %d %d %d %d %d %d %d %d %d %d", &n[0], &n[1], &n[2], &n[3],
+                                        &n[4], &n[5], &n[6], &n[7], &n[8], &n[9], &n[10]);
+            if (got >= 9)
             {
                 w.used = true;
                 w.name = std::clamp(n[0], 0, int(wii_preset_names().size()) - 1);
@@ -370,6 +394,8 @@ bool Settings::load(const std::string &path, bool overlay)
                 w.screen_y = std::clamp(n[6], 0, 900);
                 w.smooth = std::clamp(n[7], 0, 3);
                 w.reach = std::clamp(n[8], 50, 200);
+                w.move = n[9] ? 1 : 0;
+                w.swing = std::clamp(n[10], 20, 150);
             }
             continue;
         }
@@ -506,6 +532,25 @@ bool Settings::load(const std::string &path, bool overlay)
     /* 18 (3.0 Alpha 7): Recently Played has looks; off stays off. */
     if (!overlay && version < 18)
         recent_style = recent_dock ? 1 : 0;
+    /* 19 (4.1): four themes - the new Porpoise, Porpoise Classic, Revolution and
+     * Star Cube. Porpoise's look moves to the new one once (Classic is a choice
+     * away); a theme no longer offered moves to it too, OLED as its OLED mode and
+     * the light ones as its light mode. */
+    if (!overlay && versioned && version < 19)
+    {
+        if (ui_theme == 2)
+            ui_mode = 1;
+        else if (ui_theme == 9 || ui_theme == 12 || ui_theme == 16)
+            ui_mode = 2;
+        if (ui_theme == 0 || !porpoise::ui::theme_offered(ui_theme))
+        {
+            ui_theme = int(porpoise::ui::ThemeId::Glass);
+            ui_palette = 0;
+            ui_font = 0;
+        }
+    }
+    if (!overlay && !porpoise::ui::theme_offered(ui_theme))
+        ui_theme = int(porpoise::ui::ThemeId::Glass);
     /* 2.1.1: the widescreen hack switch became the Widescreen choice; on, it
      * is On (the hack for games with no code of their own). Per game too. */
     if (!saw_wide && legacy_wide >= 0)
@@ -524,9 +569,12 @@ bool Settings::load(const std::string &path, bool overlay)
     /* 4.0: the release has no developer options, debug logs or performance
      * report; a setting left on by a test build goes off. */
     developer = false;
-    debug_logs = false;
-    perf_profile = false;
-    motion_readout = motion_logs = fps_detail = fg_debug_view = fg_log = false;
+    /* (Move test builds: Debug Logs stay as chosen, on to begin with: the motion,
+     * game and app logs are what the tests are for. The release turns them off
+     * here again.) */
+    if (!debug_logs)
+        perf_profile = false; /* (the profiler: with the debug logs, for a report on a slow game) */
+    motion_readout = fps_detail = fg_debug_view = fg_log = false;
     wii_invert_x = wii_invert_y = false;
     return true;
 }
@@ -536,7 +584,7 @@ bool Settings::save(const std::string &path) const
     std::FILE *f = open_atomic(path);
     if (!f)
         return false;
-    std::fprintf(f, "# Porpoise settings (written by the Settings screen)\nsettings_version = 18\n");
+    std::fprintf(f, "# Porpoise settings (written by the Settings screen)\nsettings_version = 19\n");
     for (const Field &fd : kFields)
         write_field(f, *this, fd);
     std::fprintf(f, "border = %s\n", border.c_str());
@@ -582,8 +630,8 @@ bool Settings::save(const std::string &path) const
     {
         const WiiPreset &w = wii_presets[p];
         if (w.used)
-            std::fprintf(f, "wiipreset%d = %d %d %d %d %d %d %d %d %d\n", p + 1, w.name, w.controller, w.grip,
-                         w.pointer, w.speed, w.screen_x, w.screen_y, w.smooth, w.reach);
+            std::fprintf(f, "wiipreset%d = %d %d %d %d %d %d %d %d %d %d %d\n", p + 1, w.name, w.controller, w.grip,
+                         w.pointer, w.speed, w.screen_x, w.screen_y, w.smooth, w.reach, w.move, w.swing);
     }
     for (const std::string &folder : folders)
         std::fprintf(f, "folder = %s\n", folder.c_str());
@@ -1046,6 +1094,8 @@ void Settings::save_wii_preset(int slot, int name)
     w.screen_y = wii_screen_y;
     w.smooth = wii_smooth;
     w.reach = wii_reach;
+    w.move = wii_move ? 1 : 0;
+    w.swing = wii_swing;
     wii_preset = slot + 1;
 }
 
@@ -1062,6 +1112,8 @@ bool Settings::use_wii_preset(int slot)
     wii_screen_y = w.screen_y;
     wii_smooth = w.smooth;
     wii_reach = w.reach;
+    wii_move = w.move != 0;
+    wii_swing = w.swing;
     wii_preset = slot + 1;
     return true;
 }
@@ -1099,6 +1151,21 @@ porpoise::pad::WiiConfig Settings::wii_config(bool active, const std::string &ga
         c.range = ranges[std::clamp(wii_range, 0, 3)];
     }
     c.bar_above = sensor_bar == 1; /* where the game is told the bar is: the pointer's lights agree */
+    /* The Move is the Remote (alone or with the Nunchuk); the other Wii controllers
+     * are played on the DualSense. */
+    c.move = wii_move && (c.controller == porpoise::pad::WiiRemote || c.controller == porpoise::pad::WiiRemoteNunchuk);
+    c.swing = std::clamp(wii_swing, 20, 150);
+    c.nunchuk_right = c.move && c.controller == porpoise::pad::WiiRemoteNunchuk && wii_nunchuk_hand == 1;
+    c.navigation = c.move && c.controller == porpoise::pad::WiiRemoteNunchuk && wii_nav;
+    /* Players 2 to 4. */
+    {
+        const int holds[3] = {wii_p2_hold, wii_p3_hold, wii_p4_hold}, as[3] = {wii_p2_as, wii_p3_as, wii_p4_as};
+        for (int p = 1; p < porpoise::pad::kMaxPlayers; ++p)
+        {
+            c.hold[p] = std::clamp(holds[p - 1], 0, int(porpoise::pad::HoldCount) - 1);
+            c.as[p] = std::clamp(as[p - 1], 0, int(porpoise::pad::WiiControllerCount)) - 1;
+        }
+    }
     c.invert_x = developer && wii_invert_x; /* developer options only */
     c.invert_y = developer && wii_invert_y;
     /* Real Wii Remotes (a DolphinBar): every port is a real Remote, which

@@ -217,7 +217,7 @@ def monitor_beige():
 
 
 def logo_layer(size, alpha=255):
-    path = os.path.join(ROOT, "assets", "brand", "dolphin-color.png")
+    path = os.path.join(ROOT, "tools", "brand", "dolphin-color.png")
     logo = Image.open(path).convert("RGBA")
     logo.thumbnail((size, size), Image.LANCZOS)
     if alpha < 255:

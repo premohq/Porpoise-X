@@ -38,6 +38,14 @@
 
 namespace porpoise::pacer
 {
+/* What the pacer measured of the TV, once V-Sync first ran: its refresh rate
+ * (59.94 or 119.88; 0 not yet known or under VRR) and whether it is VRR. */
+double display_rate_hz();
+bool display_vrr();
+/* Times the TV's vblanks now if they weren't yet (V-Sync on, the display open),
+ * then as display_rate_hz. */
+double measure_display();
+
 class Pacer
 {
 public:

@@ -108,7 +108,7 @@ void App::draw_dns()
         return;
     DnsPanel &p = dns_;
     Gfx &g = *g_;
-    p.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, p.anim + 1.0f / 10.0f);
+    p.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, p.anim + float(ui_dt_) * 6.0f); /* (open in 1/6 s, at 60 or 120 Hz) */
     const float t = ease_out(p.anim);
     g.set_layer();
     g.panel(0, 0, 1920, 1080, rgba(0x02040C, 0.62f * t), 1, 0);
