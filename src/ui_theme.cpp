@@ -19,8 +19,8 @@ Color rgb(float r, float g, float b)
 Theme make_porpoise()
 {
     Theme t;
-    t.name = "Porpoise";
-    t.about = "Sapphire glass in a grid room, the boxes in a cover flow.";
+    t.name = "Porpoise Legacy";
+    t.about = "Sapphire glass in a grid room, the boxes in a cover flow, the tabs along the top.";
     t.look.background = 0;
     t.look.panel_style = 1;
     t.look.calm = 1.0f; /* 4.0: a quieter room and glass */
@@ -36,7 +36,7 @@ Theme make_revolution()
     t.name = "Revolution";
     t.about = "A bright grid of game tiles you point at by moving the controller, with the date and time below.";
     t.radius = 14;
-    t.prompts = 0.9f;
+    t.prompts = 0.82f; /* 4.5: the same size in every theme */
     return t;
 }
 
@@ -335,13 +335,30 @@ Theme make_arcade()
     return t;
 }
 
+Theme make_glass()
+{
+    Theme t;
+    t.name = "Porpoise";
+    t.about = "Liquid glass lit by the colors of the game you're on, your games as real cases. Triangle opens the "
+              "menu from anywhere.";
+    t.fonts = "manrope";
+    t.look.background = 18; /* BG_AMBIENT */
+    t.look.panel_style = 2; /* thin glass (shaders/ui.frag frost_panel) */
+    t.look.calm = 0.55f;
+    t.look.effect = 0; /* the mode: 0 dark, 1 OLED black, 2 light (look_for) */
+    t.radius = 22;
+    t.pills = true;
+    t.prompts = 0.9f;
+    return t;
+}
+
 const Theme *themes()
 {
     static const Theme all[kThemes] = {make_porpoise(),   make_revolution(),  make_midnight(),  make_minimal(),
                                        make_cube(),       make_broadcast(),   make_terminal(),  make_depth(),
                                        make_aurora(),     make_aero(),        make_dots(),      make_synthwave(),
                                        make_paper(),      make_crystal(),     make_starcube(),  make_eight_bit(),
-                                       make_beige(),      make_translucent(), make_arcade()};
+                                       make_beige(),      make_translucent(), make_arcade(),    make_glass()};
     return all;
 }
 
@@ -387,7 +404,8 @@ const FontSet &font_set(int id)
 {
     static const FontSet all[kFontSets] = {
         {"Nunito", ""},           {"M PLUS 1", "mplus"},     {"Nunito + Doto", "dotn"}, {"JetBrains Mono", "mono"},
-        {"JetBrains Mono + Doto", "dot"}, {"VT323", "vt"}, {"Exo 2", "exo"},          {"Porpoise Serif", "lora"}};
+        {"JetBrains Mono + Doto", "dot"}, {"VT323", "vt"}, {"Exo 2", "exo"},          {"Porpoise Serif", "lora"},
+        {"Manrope", "manrope"}};
     return all[std::clamp(id, 0, kFontSets - 1)];
 }
 
@@ -420,6 +438,17 @@ Look look_for(const porpoise::Settings &s)
             l.light0 = p.light0;
             l.light1 = p.light1;
         }
+    }
+    if (s.ui_theme == int(ThemeId::Glass))
+    {
+        /* The room's mode (shaders/ui.frag ambient), and glass with no blue in it:
+         * the colour is the game's, in the room behind. Dark glass is a smoky
+         * frosting, OLED's near black, Light's (drawn toned) near white. */
+        const int mode = std::clamp(s.ui_mode, 0, 2);
+        l.effect = float(mode);
+        l.saturation = 0.10f;
+        l.dark = mode == 0 ? 1.7f : mode == 1 ? 0.45f : 1.0f;
+        l.fill_alpha = mode == 0 ? 0.78f : mode == 1 ? 0.92f : 0.85f;
     }
     l.colour_filter = std::clamp(s.colour_filter, 0, 4);
     l.high_contrast = s.high_contrast;

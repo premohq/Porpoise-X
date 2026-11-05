@@ -113,7 +113,7 @@ void App::draw_account()
     if (!acct_.open)
         return;
     Gfx &g = *g_;
-    acct_.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, acct_.anim + 1.0f / 10.0f);
+    acct_.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, acct_.anim + float(ui_dt_) * 6.0f); /* (open in 1/6 s, at 60 or 120 Hz) */
     const float t = ease_out(acct_.anim);
     const RaState s = ra_state_ ? ra_state_() : RaState{};
     g.set_layer();

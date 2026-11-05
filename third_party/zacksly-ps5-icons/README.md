@@ -10,6 +10,8 @@ them, and in doing so **modifies** them as follows:
 
 - `assets/ui/buttons.png` puts the outline and solid button icons in one atlas
   at a small size.
+- `assets/ui/buttons-solid.png` does the same with the "Full Solid" icons
+  (`full-solid/`, the white set).
 - `assets/ui/dualsense.png` lays the outline controller over a faint copy of
   the solid one, makes its lines a little thicker, and removes the
   PlayStation logo.

@@ -53,8 +53,10 @@ bool is_game_file(const std::string &name)
 {
     /* Discs, WADs (WiiWare, Virtual Console, channels) and GameCube demo
      * discs (.tgc). Homebrew (.dol, .elf) is found only beside its meta.xml
-     * (find_games): an .elf alone could be anything, a PS5 payload too. */
-    static const char *const known[] = {"iso", "gcm", "rvz", "ciso", "gcz", "wbfs", "wia", "wad", "tgc"};
+     * (find_games): an .elf alone could be anything, a PS5 payload too.
+     * .bin: Triforce arcade games are often kept so (Dolphin reads them as
+     * discs); a .bin that isn't one is another console's and stays hidden. */
+    static const char *const known[] = {"iso", "gcm", "rvz", "ciso", "gcz", "wbfs", "wia", "wad", "tgc", "bin"};
     const std::string ext = extension(name);
     for (const char *k : known)
         if (ext == k)
@@ -253,7 +255,7 @@ bool read_disc_header(const std::string &path, Game &g, bool *foreign)
     {
         data = 0;
         const std::string ext = extension(g.file);
-        g.format = ext == "gcm" ? "GCM" : "ISO";
+        g.format = ext == "gcm" ? "GCM" : ext == "bin" ? "BIN" : "ISO";
     }
     if (data > 0)
     {
@@ -275,7 +277,7 @@ bool read_disc_header(const std::string &path, Game &g, bool *foreign)
     /* An image read that isn't a GameCube or Wii disc (no magic word, as the
      * emulator wants one): another console's, a PS2 or PSP .iso in a shared
      * roms folder. Not a read that failed: that one stays. */
-    const bool plain = g.format == "ISO" || g.format == "GCM";
+    const bool plain = g.format == "ISO" || g.format == "GCM" || g.format == "BIN";
     if (got < 0x60)
     {
         if (foreign && plain && first >= 0)
@@ -408,6 +410,19 @@ std::string play_time_text(long long seconds)
 
 namespace
 {
+/* A Triforce arcade game: a GameCube disc with the arcade board's boot.id
+ * ("BTID") in its file system. Read once, when the file is first found.
+ * 1 yes, 0 no, -1 the disc couldn't be read (a share that dropped): asked
+ * again next time rather than kept as "no". */
+int triforce_state(const std::string &path)
+{
+    std::vector<std::uint8_t> boot_id;
+    std::string error;
+    if (porpoise::disc::read_file(path, "boot.id", boot_id, error))
+        return boot_id.size() >= 4 && std::memcmp(boot_id.data(), "BTID", 4) == 0 ? 1 : 0;
+    return error.find("is not on the disc") != std::string::npos ? 0 : -1;
+}
+
 /* One game file as the library knows it: its header (or WAD, or app) read.
  * foreign: set when the file is another console's disc image. */
 Game game_from_file(const std::string &path, bool *foreign = nullptr, bool *read_ok = nullptr)
@@ -430,6 +445,14 @@ Game game_from_file(const std::string &path, bool *foreign = nullptr, bool *read
         ok = read_disc_header(path, g); /* a demo disc's file: its header is further in */
     else
         ok = read_disc_header(path, g, foreign);
+    if (ok && g.platform == "GameCube" && ext != "tgc")
+    {
+        const int arcade = triforce_state(path);
+        if (arcade == 1)
+            g.kind = "Triforce";
+        else if (arcade < 0)
+            ok = false; /* (not cached: read again next time) */
+    }
     if (read_ok)
         *read_ok = ok;
     if (ext == "tgc")
@@ -491,6 +514,7 @@ struct Cached
     bool foreign = false;
     std::string id, title, format, platform, region, kind, app_dir;
     int disc_number = 0;
+    bool arcade_unknown = false; /* from a v1 cache: not yet looked at for the Triforce's boot.id */
 };
 std::mutex g_cache_lock;
 std::string g_cache_path;
@@ -498,7 +522,9 @@ std::unordered_map<std::string, Cached> g_cache;
 bool g_cache_loaded = false;
 /* A new version here whenever read_disc_header, read_wad_header or
  * read_app_meta read something differently: every file is read again. */
-constexpr const char *kCacheHead = "# Porpoise's disc headers, read once: path, size, time, what they say (v1)";
+constexpr const char *kCacheHead = "# Porpoise's disc headers, read once: path, size, time, what they say (v2)";
+/* v1 (before Triforce): kept, its GameCube discs looked at for boot.id once. */
+constexpr const char *kCacheHeadV1 = "# Porpoise's disc headers, read once: path, size, time, what they say (v1)";
 
 std::string cache_field(std::string s)
 {
@@ -518,7 +544,7 @@ void load_cache()
         return;
     std::string line;
     char buf[4096];
-    bool first = true;
+    bool first = true, v1 = false;
     while (std::fgets(buf, sizeof buf, f))
     {
         line += buf;
@@ -528,7 +554,8 @@ void load_cache()
         if (first)
         {
             first = false;
-            if (line != kCacheHead)
+            v1 = line == kCacheHeadV1;
+            if (line != kCacheHead && !v1)
                 break; /* another version's: read afresh */
             line.clear();
             continue;
@@ -542,7 +569,7 @@ void load_cache()
                 start = i + 1;
             }
         line.clear();
-        if (v.size() != 12)
+        if (v.size() != 12 && v.size() != 13)
             continue;
         Cached c;
         c.bytes = std::strtoull(v[1].c_str(), nullptr, 10);
@@ -556,6 +583,8 @@ void load_cache()
         c.region = v[9];
         c.kind = v[10];
         c.app_dir = v[11];
+        c.arcade_unknown = (v1 && !c.foreign && c.platform == "GameCube" && c.kind.empty() && c.format != "TGC") ||
+                           (v.size() == 13 && v[12] == "?");
         g_cache[v[0]] = std::move(c);
     }
     std::fclose(f);
@@ -570,11 +599,11 @@ void save_cache()
         return;
     std::fprintf(f, "%s\n", kCacheHead);
     for (const auto &[path, c] : g_cache)
-        std::fprintf(f, "%s\t%llu\t%lld\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", cache_field(path).c_str(),
+        std::fprintf(f, "%s\t%llu\t%lld\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s%s\n", cache_field(path).c_str(),
                      (unsigned long long)c.bytes, (long long)c.mtime, c.foreign ? 1 : 0, cache_field(c.id).c_str(),
                      c.disc_number, cache_field(c.title).c_str(), cache_field(c.format).c_str(),
                      cache_field(c.platform).c_str(), cache_field(c.region).c_str(), cache_field(c.kind).c_str(),
-                     cache_field(c.app_dir).c_str());
+                     cache_field(c.app_dir).c_str(), c.arcade_unknown ? "\t?" : ""); /* (not yet looked at for boot.id) */
     porpoise::finish_atomic(f, g_cache_path);
 }
 } // namespace
@@ -638,6 +667,25 @@ std::vector<Game> read_games(std::vector<std::string> files)
             g.region = hit.region;
             g.kind = hit.kind;
             g.app_dir = hit.app_dir;
+            if (hit.arcade_unknown)
+            {
+                /* (An older cache's GameCube disc: looked at once for boot.id;
+                 * one that can't be read now is looked at next time.) */
+                const int arcade = triforce_state(path);
+                if (arcade == 1)
+                    g.kind = "Triforce";
+                if (arcade >= 0)
+                {
+                    std::lock_guard<std::mutex> lock(g_cache_lock);
+                    const auto it = g_cache.find(path);
+                    if (it != g_cache.end())
+                    {
+                        it->second.kind = g.kind;
+                        it->second.arcade_unknown = false;
+                    }
+                    changed = true;
+                }
+            }
             games.push_back(std::move(g));
             continue;
         }
@@ -851,7 +899,44 @@ void Library::sort(Sort how)
             return a.favourite;
         return lower(a.title) < lower(b.title);
     });
-    const auto split = std::stable_partition(games_.begin(), games_.end(), [this](const Game &g) { return shows(g); });
+    /* The same disc in two files (an ISO and an RVZ): one of them is the copy -
+     * the one played less lately, else the plainer format. A game's second
+     * disc is a disc of its own (key_of has the disc number). */
+    {
+        auto rank = [](const Game &g) {
+            static const char *kOrder[] = {"RVZ", "WIA", "WBFS", "CISO", "GCZ", "ISO"};
+            for (int i = 0; i < 6; ++i)
+                if (g.format == kOrder[i])
+                    return i;
+            return 6;
+        };
+        std::unordered_map<std::string, std::size_t> keep;
+        for (std::size_t i = 0; i < games_.size(); ++i)
+        {
+            Game &g = games_[i];
+            g.duplicate = false;
+            if (g.id.empty() || (!g.kind.empty() && g.kind != "Triforce") || g.boot_menu)
+                continue;
+            const std::string key = key_of(g);
+            const auto it = keep.find(key);
+            if (it == keep.end())
+            {
+                keep[key] = i;
+                continue;
+            }
+            Game &k = games_[it->second];
+            const bool better = g.last_played != k.last_played ? g.last_played > k.last_played : rank(g) < rank(k);
+            if (better)
+            {
+                k.duplicate = true;
+                it->second = i;
+            }
+            else
+                g.duplicate = true;
+        }
+    }
+    const auto split = std::stable_partition(games_.begin(), games_.end(),
+                                             [this](const Game &g) { return shows(g) && !(hide_dupes_ && g.duplicate); });
     shown_ = int(split - games_.begin());
 }
 
@@ -949,6 +1034,7 @@ void Library::load_state()
             show_ = s == "show=wii"        ? Show::Wii
                     : s == "show=gamecube" ? Show::GameCube
                     : s == "show=channels" ? Show::Channels
+                    : s == "show=favourites" ? Show::Favourites
                                            : Show::All;
         else if (s.rfind("played=", 0) == 0 || s.rfind("time=", 0) == 0 || s.rfind("fav=", 0) == 0)
         {
@@ -988,7 +1074,10 @@ void Library::save() const
         return;
     std::fprintf(f, "selected=%s\nsort=%s\n", selected_.c_str(), sort_name(sort_));
     if (show_ != Show::All)
-        std::fprintf(f, "show=%s\n", show_ == Show::Wii ? "wii" : show_ == Show::Channels ? "channels" : "gamecube");
+        std::fprintf(f, "show=%s\n", show_ == Show::Wii        ? "wii"
+                                     : show_ == Show::Channels  ? "channels"
+                                     : show_ == Show::Favourites ? "favourites"
+                                                                : "gamecube");
     /* One line of each kind per key, however many copies of a game there are:
      * each key once, in the library's order, with its copies merged. */
     struct Merged

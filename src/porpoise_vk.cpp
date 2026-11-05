@@ -53,6 +53,10 @@ extern "C" int __wrap_sceVideoOutOpen(int user, int bus, int index, const void *
 extern "C" int sceVideoOutWaitVblank(int handle);
 extern "C" int sceVideoOutGetResolutionStatus(int handle, void *status);
 extern "C" int sceVideoOutClose(int handle);
+extern "C" int sceVideoOutIsOutputSupported(std::int32_t handle, std::uint32_t mode, const void *reserved1,
+                                            const void *reserved2, const void *reserved3);
+extern "C" int sceVideoOutConfigureOutput(std::int32_t handle, std::uint32_t mode, const void *reserved1,
+                                          const void *reserved2, const void *reserved3);
 #endif
 
 namespace
@@ -1388,7 +1392,52 @@ int g_videoout = -1;
 int g_videoout_tries = 0;
 /* The handle the driver's WSI got from sceVideoOutOpen (below). */
 std::atomic<int> g_videoout_opened{-1};
+/* Refresh Rate: VRR (set_own_high_rate): asked for, and the handle put at 119.88 Hz. */
+std::atomic<bool> g_want_own_hfr{false};
+std::atomic<int> g_own_hfr_handle{-1};
+/* The clock frame generation waits on under VRR (set_virtual_vblank): a tick
+ * every g_virtual_ns, from the first wait on. */
+std::atomic<long long> g_virtual_ns{0};
+std::atomic<unsigned> g_virtual_changes{0};
+long long g_virtual_anchor = 0;
+long long mono_ns()
+{
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<long long>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+}
 } // namespace
+
+void set_own_high_rate(bool on)
+{
+    g_want_own_hfr.store(on);
+}
+
+bool own_high_rate()
+{
+    return g_own_hfr_handle.load() >= 0;
+}
+
+void set_virtual_vblank(double hz)
+{
+    g_virtual_anchor = 0;
+    g_virtual_ns.store(hz > 20.0 && hz < 250.0 ? static_cast<long long>(1e9 / hz) : 0);
+    g_virtual_changes.fetch_add(1);
+    char line[96];
+    std::snprintf(line, sizeof line, "vk: frame generation's own refresh: %s %.2f Hz", hz > 20.0 ? "on," : "off", hz);
+    ps5::debug::mark(line);
+}
+
+unsigned virtual_vblank_changes()
+{
+    return g_virtual_changes.load();
+}
+
+double virtual_vblank_hz()
+{
+    const long long ns = g_virtual_ns.load();
+    return ns > 0 ? 1e9 / double(ns) : 0.0;
+}
 
 #ifdef PORPOISE_DESKTOP
 /* A desktop's V-Sync is the swapchain's (FIFO); there's no vblank to wait on
@@ -1406,6 +1455,7 @@ bool flip_status(std::uint64_t &, int &)
 {
     return false;
 }
+void restore_output() {}
 #else
 void note_videoout(int handle)
 {
@@ -1456,7 +1506,37 @@ bool vblank_ready()
 
 bool wait_vblank()
 {
+    if (const long long tick = g_virtual_ns.load(); tick > 0)
+    {
+        /* Frame generation under VRR: the next tick of Porpoise's own clock. */
+        const long long now = mono_ns();
+        if (g_virtual_anchor == 0 || now - g_virtual_anchor > 3600000000000LL)
+            g_virtual_anchor = now;
+        const long long next = g_virtual_anchor + ((now - g_virtual_anchor) / tick + 1) * tick;
+        for (;;)
+        {
+            const long long left = next - mono_ns();
+            if (left <= 0)
+                break;
+            if (left > 1500000)
+            {
+                const long long nap = left - 1000000;
+                timespec ts{static_cast<time_t>(nap / 1000000000LL), static_cast<long>(nap % 1000000000LL)};
+                nanosleep(&ts, nullptr);
+            }
+        }
+        return true;
+    }
     return g_videoout >= 0 && sceVideoOutWaitVblank(g_videoout) == 0;
+}
+
+void restore_output()
+{
+    const int handle = g_own_hfr_handle.exchange(-1);
+    if (handle < 0)
+        return;
+    const int r = sceVideoOutConfigureOutput(handle, 1, nullptr, nullptr, nullptr);
+    ps5::debug::mark_value("vk: output back at 59.94 Hz (configure 1)", r);
 }
 
 bool flip_status(std::uint64_t &count, int &pending)
@@ -1493,6 +1573,14 @@ void set_picture_adjust(float saturation, float contrast, float warmth, float bl
     g_adjust[3] = bloom;
 }
 
+float g_crop[4] = {0, 0, 0, 0}; /* set_crop: left, top, right, bottom */
+
+void set_crop(const float crop[4])
+{
+    for (int i = 0; i < 4; ++i)
+        g_crop[i] = std::clamp(crop[i], 0.0f, 0.2f);
+}
+
 void set_game_colour_filter(int mode)
 {
     g_colour_filter = mode;
@@ -1505,6 +1593,10 @@ Push core_quad(unsigned width, unsigned height, float aspect, int filter, float 
 {
     if (aspect <= 0.0f)
         aspect = float(width) / float(height);
+    /* Cropped: what's left keeps its shape (a narrower picture, a taller one). */
+    const float keep_w = 1.0f - g_crop[0] - g_crop[2], keep_h = 1.0f - g_crop[1] - g_crop[3];
+    if (keep_w > 0.5f && keep_h > 0.5f)
+        aspect *= keep_w / keep_h;
     /* Aspect-fit into the screen, centred. */
     const float sw = float(s.extent.width), sh = float(s.extent.height);
     float w = sw, h = sw / aspect;
@@ -1519,10 +1611,10 @@ Push core_quad(unsigned width, unsigned height, float aspect, int filter, float 
     quad.rect[1] = y0 / sh * 2.0f - 1.0f;
     quad.rect[2] = (x0 + w) / sw * 2.0f - 1.0f;
     quad.rect[3] = (y0 + h) / sh * 2.0f - 1.0f;
-    quad.uv[0] = 0.0f;
-    quad.uv[1] = 0.0f;
-    quad.uv[2] = 1.0f;
-    quad.uv[3] = 1.0f;
+    quad.uv[0] = g_crop[0];
+    quad.uv[1] = g_crop[1];
+    quad.uv[2] = 1.0f - g_crop[2];
+    quad.uv[3] = 1.0f - g_crop[3];
     quad.color[0] = quad.color[1] = quad.color[2] = quad.color[3] = 1.0f;
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1532,8 +1624,8 @@ Push core_quad(unsigned width, unsigned height, float aspect, int filter, float 
     quad.params[3] = float(g_colour_filter);
     for (int i = 0; i < 4; ++i)
         quad.adjust[i] = g_adjust[i];
-    quad.size[0] = float(width);
-    quad.size[1] = float(height);
+    quad.size[0] = float(width) * (1.0f - g_crop[0] - g_crop[2]);
+    quad.size[1] = float(height) * (1.0f - g_crop[1] - g_crop[3]);
     quad.size[2] = w;
     quad.size[3] = h;
     /* Where the picture sits, in the launcher's 1920x1080 design space, for
@@ -2059,7 +2151,55 @@ extern "C" int __wrap_sceVideoOutOpen(int user, int bus, int index, const void *
 {
     const int handle = __real_sceVideoOutOpen(user, bus, index, parameter);
     if (handle >= 0)
+    {
         porpoise::vk::note_videoout(handle);
+        /* Refresh Rate: VRR: 119.88 Hz on the fresh handle, before the driver
+         * sets a flip rate or a buffer. The console offers it with the PS5 at
+         * 1440p or 4K on a 120 Hz TV; otherwise the output stays at 59.94. */
+        if (porpoise::vk::g_want_own_hfr.load())
+        {
+            const int offered = sceVideoOutIsOutputSupported(handle, 15, nullptr, nullptr, nullptr);
+            int taken = offered > 0 ? sceVideoOutConfigureOutput(handle, 15, nullptr, nullptr, nullptr) : -1;
+            long long period = 0;
+            if (taken == 0)
+            {
+                /* Taken, but is the TV at it? The median of six refreshes:
+                 * 8.3 ms at 120 Hz, VRR's slowest (17.5-26 ms) under VRR; a
+                 * TV that stayed at 60 Hz (16.7 ms) gets 59.94 back. */
+                long long gaps[6] = {};
+                bool waited = sceVideoOutWaitVblank(handle) == 0;
+                long long last = porpoise::vk::mono_ns();
+                for (long long &gap : gaps)
+                {
+                    if (!waited || sceVideoOutWaitVblank(handle) != 0)
+                    {
+                        waited = false;
+                        break;
+                    }
+                    const long long now = porpoise::vk::mono_ns();
+                    gap = now - last;
+                    last = now;
+                }
+                if (waited)
+                {
+                    std::sort(gaps, gaps + 6);
+                    period = (gaps[2] + gaps[3]) / 2;
+                }
+                if (period >= 15000000 && period < 17500000)
+                {
+                    sceVideoOutConfigureOutput(handle, 1, nullptr, nullptr, nullptr);
+                    taken = -2;
+                }
+            }
+            if (taken == 0)
+                porpoise::vk::g_own_hfr_handle.store(handle);
+            char line[160];
+            std::snprintf(line, sizeof line, "vk: 119.88 Hz %s (offered %d, configure %#x, a refresh %.2f ms)",
+                          taken == 0 ? "on" : taken == -2 ? "taken but the TV stayed at 60 Hz: 59.94 back" : "not taken",
+                          offered, unsigned(taken), period / 1e6);
+            ps5::debug::mark(line);
+        }
+    }
     return handle;
 }
 #endif

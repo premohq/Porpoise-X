@@ -102,8 +102,7 @@ void App::draw_rev_top_bar(bool clock)
     }
     g.glyph(Glyph::L1, bar_x - 62, kBarCy, 44, rgba(0x8A939D));
     g.glyph(Glyph::R1, bar_x + bar_w + 62, kBarCy, 44, rgba(0x8A939D));
-    if (clock)
-        g.text_mid(Font::SemiBold, ts(27), 1866, kBarCy, rev::kInkSoft, Align::Right, clock_text());
+    (void)clock; /* 4.5: the time and the controllers are the island's (draw_revolution) */
 }
 
 /* Digits drawn in segments, like a clock's display; the colon blinks. */
@@ -479,8 +478,9 @@ App::Action App::update_rev_details(bool left, bool right, bool up, bool down, d
     }
     if (pressed(BtnOptions))
     {
-        lib_->toggle_favourite(game);
-        sfx(game.favourite ? Sound::LaunchGame : Sound::MovingTab);
+        /* Options - start - plays it, straight in. (Its favorite: the chip.) */
+        sfx(Sound::LaunchGame);
+        return start_game(&game, "", false, true);
     }
     if (pressed(BtnCircle))
     {

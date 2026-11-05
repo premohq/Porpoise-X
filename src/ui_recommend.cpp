@@ -86,6 +86,7 @@ constexpr Known kKnown[] = {
     {"EFBToTextureEnable", "EFB Copies", "To Texture Only", "To RAM Too (Accurate)"},
     {"XFBToTextureEnable", "XFB Copies", "To Texture Only", "To RAM Too (Accurate)"},
     {"CPUThread", "Dual Core", "On", "Off"},
+    {"SyncGPU", "Dual Core in Step (Sync GPU)", "On", "Off"},
     {"EnableJIT", "CPU Recompiler", "On", "Off"},
     {"DSPHLE", "Audio Emulation", "Fast (HLE)", "Accurate (LLE)"},
     {"ForceTextureFiltering", "Texture Filtering", nullptr, nullptr},
@@ -93,6 +94,7 @@ constexpr Known kKnown[] = {
     {"EFBEmulateFormatChanges", "Emulate EFB Format Changes", "On", "Off"},
     {"DeferEFBCopies", "Defer EFB Copies", "On", "Off"},
     {"MMU", "Full Memory Management (MMU)", "On", "Off"},
+    {"PageTableFastmem", "Virtual Memory Mapping", "On", "Off"},
     {"VertexRounding", "Vertex Rounding", "On", "Off"},
     {"FPRF", "Floating-Point Result Flags", "On", "Off"},
     {"SyncOnSkipIdle", "Sync on Idle Skipping", "On", "Off"},
@@ -181,6 +183,13 @@ void read_fixes(const std::string &path, std::vector<Fix> &out)
             fix.override_key = "dolphin." + fix.section + "." + k;
             fix.off_value = is_true(v) ? "False" : "True";
         }
+        else if (k == "SafeTextureCacheColorSamples" && v != "128")
+        {
+            /* (Oct 25: a slower texture cache can't be turned off otherwise:
+             * off is the fast one, Porpoise's own) */
+            fix.override_key = "dolphin." + fix.section + "." + k;
+            fix.off_value = "128";
+        }
         for (const Known &kn : kKnown)
             if (k == kn.key)
             {
@@ -242,6 +251,24 @@ std::vector<Fix> dolphin_fixes(const std::string &id)
     read_fixes(g_settings_dir + "/" + id.substr(0, 3) + ".ini", out);
     if (id.size() >= 6)
         read_fixes(g_settings_dir + "/" + id.substr(0, 6) + ".ini", out);
+    /* A game that uses the MMU: Dolphin's mapping of its virtual memory, on by
+     * default, offered as a switch. On the PS5's 16 KB pages few of the game's
+     * 4 KB pages can be mapped, and each change to its page table is rescanned
+     * all the same; off may run such a game faster. */
+    for (const Fix &fix : out)
+        if (fix.key == "MMU" && is_true(fix.raw))
+        {
+            Fix map;
+            map.label = "Virtual Memory Mapping";
+            map.value = "On";
+            map.section = "Core";
+            map.key = "PageTableFastmem";
+            map.raw = "True";
+            map.override_key = "dolphin.Core.PageTableFastmem";
+            map.off_value = "False";
+            out.push_back(map);
+            break;
+        }
     return out;
 }
 

@@ -15,6 +15,9 @@ void set_source_rate(double hz);
 double source_rate();
 /* Interleaved stereo s16 frames from the core. Never blocks. */
 void push(const std::int16_t *frames, std::size_t count);
+/* Porpoise's own sound, already 48 kHz: queued as it is (push resamples, and
+ * its small nudges softened the effects' highs; its stretch lowered them). */
+void push_direct(const std::int16_t *frames, std::size_t count);
 /* 0.0 .. 1.0, applied at output. */
 /* How much sound is kept queued: 0 low, 1 normal, 2 safe (Settings > Audio). */
 void set_buffer(int level);

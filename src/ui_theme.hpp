@@ -40,8 +40,20 @@ enum class ThemeId
     Beige,
     Translucent,
     Arcade,
+    Glass, /* 4.1: Porpoise - liquid glass lit by the game you're on; the old Porpoise is Classic */
 };
-constexpr int kThemes = 19;
+constexpr int kThemes = 20;
+/* The themes the Theme setting offers, in its order (the others are kept only
+ * so a settings file naming one still reads: it moves to Porpoise). */
+constexpr int kOfferedThemes[4] = {int(ThemeId::Glass), int(ThemeId::Porpoise), int(ThemeId::Revolution),
+                                   int(ThemeId::StarCube)};
+inline bool theme_offered(int id)
+{
+    for (int t : kOfferedThemes)
+        if (t == id)
+            return true;
+    return false;
+}
 
 struct Theme
 {
@@ -80,7 +92,7 @@ struct FontSet
     const char *name;
     const char *set;
 };
-constexpr int kFontSets = 8;
+constexpr int kFontSets = 9;
 const FontSet &font_set(int id);
 /* The font set for these settings: the chosen one, or the theme's own. */
 const char *fonts_for(const porpoise::Settings &s);

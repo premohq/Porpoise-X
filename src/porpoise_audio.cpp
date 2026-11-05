@@ -261,6 +261,19 @@ void push(const std::int16_t *frames, std::size_t count)
     pthread_mutex_unlock(&a.mutex);
 }
 
+void push_direct(const std::int16_t *frames, std::size_t count)
+{
+    if (!g || !g->thread_started || g->dead.load(std::memory_order_relaxed) || count == 0)
+        return;
+    Audio &a = *g;
+    pthread_mutex_lock(&a.mutex);
+    for (std::size_t i = 0; i < count; ++i)
+        put(a, frames[i * 2], frames[i * 2 + 1]);
+    a.prev[0] = frames[(count - 1) * 2];
+    a.prev[1] = frames[(count - 1) * 2 + 1];
+    pthread_mutex_unlock(&a.mutex);
+}
+
 void set_buffer(int level)
 {
     g_target_frames = level <= 0 ? 1152 : level >= 2 ? 4608 : 2304; /* ~24, 48 or 96 ms */

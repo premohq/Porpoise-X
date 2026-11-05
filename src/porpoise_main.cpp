@@ -14,6 +14,7 @@
 #include "porpoise_netfs.hpp"
 #include "porpoise_dns.hpp"
 #include "porpoise_paths.hpp"
+#include "porpoise_debuglog.hpp"
 #include <algorithm>
 #include <tuple>
 #include <atomic>
@@ -60,6 +61,7 @@
 #include "porpoise_pacer.hpp"
 #include "porpoise_aim.hpp"
 #include "porpoise_pad.hpp"
+#include "porpoise_move.hpp"
 #include "porpoise_ra.hpp"
 #include "ui_widescreen.hpp"
 #include "porpoise_sound.hpp"
@@ -99,6 +101,7 @@ namespace
  * reinstalling Porpoise keeps games, saves, settings and covers. If the
  * sandbox will not let Porpoise write there, the app's own folder is used. */
 std::string g_data = PORPOISE_APP "/porpoise";
+std::string g_game_debug_dir; /* this play's folder in the debug folder ("" when off) */
 std::string g_settings_path, g_options_path, g_saves_path, g_options_reference, g_core_log;
 
 bool g_sandboxed = false; /* /data out of reach even after asking the HEN */
@@ -411,6 +414,7 @@ void on_terminate()
 [[noreturn]] void leave(int status)
 {
     ps5::debug::mark_value("main: leaving through the shell, status", status);
+    porpoise::vk::restore_output(); /* (Refresh Rate: VRR's 120 Hz outlives the process otherwise) */
     porpoise::audio::close();
     porpoise::pad::close();
     ps5::memory::finish();
@@ -890,6 +894,52 @@ bool install_ipl_for(const std::string &region)
     return ok;
 }
 
+/* The player's own SegaBoot (the Triforce's firmware) from <data>/bios, copied
+ * to where the core looks for it (User/Triforce/segaboot.gcm) when it isn't
+ * the same file already. The arcade games start without it; their test menu
+ * (L1) needs it. Porpoise ships none. */
+bool install_segaboot()
+{
+    const std::string dir = g_saves_path + "/User/Triforce", to = dir + "/segaboot.gcm";
+    mkdir((g_saves_path + "/User").c_str(), 0777);
+    mkdir(dir.c_str(), 0777); /* (the core keeps the board's settings and backup here too) */
+    const std::string from = porpoise::bios::find_segaboot(g_data + "/bios");
+    struct stat src_st, dst_st;
+    if (from.empty() || stat(from.c_str(), &src_st) != 0)
+    {
+        ps5::debug::mark("main: an arcade game, no SegaBoot in bios/ (the test menu needs it)");
+        return stat(to.c_str(), &dst_st) == 0;
+    }
+    auto head = [](const std::string &path, std::vector<char> &out) {
+        out.assign(65536, 0);
+        std::FILE *f = std::fopen(path.c_str(), "rb");
+        const bool got = f && std::fread(out.data(), 1, out.size(), f) > 0;
+        if (f)
+            std::fclose(f);
+        return got;
+    };
+    std::vector<char> a, b;
+    if (stat(to.c_str(), &dst_st) == 0 && dst_st.st_size == src_st.st_size && head(from, a) && head(to, b) && a == b)
+        return true; /* the same one, copied already */
+    const std::string part = to + ".part";
+    std::FILE *in = std::fopen(from.c_str(), "rb");
+    std::FILE *out = in ? std::fopen(part.c_str(), "wb") : nullptr;
+    bool ok = in && out;
+    std::vector<char> buf(1 << 20);
+    std::size_t n;
+    while (ok && (n = std::fread(buf.data(), 1, buf.size(), in)) > 0)
+        ok = std::fwrite(buf.data(), 1, n, out) == n;
+    if (in)
+        std::fclose(in);
+    if (out)
+        ok = std::fclose(out) == 0 && ok;
+    ok = ok && std::rename(part.c_str(), to.c_str()) == 0;
+    if (!ok)
+        std::remove(part.c_str());
+    ps5::debug::mark(ok ? "main: SegaBoot in place for the arcade game" : "main: couldn't copy SegaBoot");
+    return ok;
+}
+
 /* A game's region folder: USA, JAP (Japan, Korea) or EUR. */
 std::string ipl_region(const porpoise::ui::Game &game)
 {
@@ -1129,6 +1179,15 @@ void apply_frame_gen()
         c.log = g_settings.fg_log && g_settings.debug_logs;
     }
     porpoise::framegen::set_config(c);
+    /* Refresh Rate: VRR: the TV has no steady refresh, so frame generation
+     * gets a clock of Porpoise's own at the output's rate (119.88 when
+     * Porpoise got 120 Hz). Off again without frame generation: VRR then
+     * shows each of the game's frames as it comes. */
+    const double want = porpoise::pacer::display_vrr() && c.on
+                            ? (porpoise::vk::own_high_rate() ? 119.88 : 59.94)
+                            : 0.0;
+    if (std::fabs(want - porpoise::vk::virtual_vblank_hz()) > 0.5)
+        porpoise::vk::set_virtual_vblank(want);
 }
 
 /* The game's own controller extras: fast forward and quick save buttons,
@@ -1152,6 +1211,14 @@ void apply_game_controls(bool wii_game)
  * itself, so it can be heard as it's chosen. */
 bool g_sounds_ready = false; /* porpoise::sound::load has run */
 
+/* Soundscape: the Porpoise look, Revolution and Star Cube. Porpoise Legacy
+ * (and the older looks) keep the old music. */
+bool new_look_music(int theme)
+{
+    using porpoise::ui::ThemeId;
+    return theme == int(ThemeId::Glass) || theme == int(ThemeId::Revolution) || theme == int(ThemeId::StarCube);
+}
+
 void apply_sound_set(int set)
 {
     static int current = -1;
@@ -1174,6 +1241,7 @@ void apply_sound_set(int set)
 
 void apply_settings()
 {
+    porpoise::sound::set_music_track(new_look_music(g_settings.ui_theme) ? 1 : 0);
     porpoise::sound::set_music(g_settings.menu_music, g_settings.music_volume / 10.0f);
     porpoise::sound::set_effects(g_settings.menu_sounds, g_settings.sounds_volume / 10.0f);
     apply_sound_set(g_settings.sound_set);
@@ -1210,6 +1278,50 @@ void apply_settings()
                 std::fclose(f);
             }
     }
+#ifndef PORPOISE_DESKTOP
+    {
+        /* Settings > Video > Refresh Rate, for the next start: the file read
+         * before the display opens, and Porpoise's declaration to the PS5
+         * (sce_sys/param.json's attribute3): fixed 120 Hz turns the
+         * console's VRR off for Porpoise (0x80040, as before); VRR keeps it
+         * on and still allows 120 Hz (0x40040, as VRR games declare). */
+        const bool vrr = g_settings.refresh_mode == 1;
+        if (std::FILE *f = std::fopen(PORPOISE_APP "/porpoise/refresh.txt", "w"))
+        {
+            std::fputs(vrr ? "vrr" : "fixed", f);
+            std::fclose(f);
+        }
+        const std::string param = PORPOISE_APP "/sce_sys/param.json";
+        std::string text;
+        if (std::FILE *f = std::fopen(param.c_str(), "rb"))
+        {
+            char buf[4096];
+            std::size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, f)) > 0)
+                text.append(buf, n);
+            std::fclose(f);
+        }
+        const std::size_t at = text.find("\"attribute3\"");
+        const std::size_t colon = at == std::string::npos ? at : text.find(':', at);
+        const std::size_t end = colon == std::string::npos ? colon : text.find_first_of(",}\n", colon);
+        if (end != std::string::npos)
+        {
+            const std::string want = vrr ? " 262208" : " 524352";
+            if (text.substr(colon + 1, end - colon - 1) != want)
+            {
+                text.replace(colon + 1, end - colon - 1, want);
+                bool ok = false;
+                if (std::FILE *f = porpoise::open_atomic(param))
+                {
+                    const bool wrote = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+                    ok = porpoise::finish_atomic(f, param) && wrote;
+                }
+                ps5::debug::mark(ok ? (vrr ? "main: declared for VRR (next start)" : "main: declared for fixed 120 Hz (next start)")
+                                    : "main: couldn't change sce_sys/param.json");
+            }
+        }
+    }
+#endif
     /* Settings > About > Performance report: the sampling profiler
      * (sampler_ps5.cpp) reads this file when Porpoise starts. */
     const char *const profile = PORPOISE_APP "/ps5-sampler.txt";
@@ -1426,6 +1538,12 @@ int menu_paused(void *)
     }
     else if (key == "screen_filter" || key == "filter_strength")
         porpoise::core::set_picture(g_play.screen_filter, g_play.filter_strength / 10.0f);
+    else if (key.rfind("crop_", 0) == 0 && key != "crop_overscan")
+    {
+        float crop[4];
+        g_play.crop(crop);
+        porpoise::vk::set_crop(crop);
+    }
     else if (key == "bloom" || key.rfind("color_", 0) == 0)
     {
         float adjust[4];
@@ -1530,6 +1648,9 @@ int menu_paused(void *)
 /* A Wii game with the gyro pointer: how to centre it, for the first seconds,
  * and a short "centered" each time it is. */
 double g_wii_hint_from = -1;      /* g_time the game started, or -1 */
+double g_arcade_hint_from = -1;   /* a Triforce game's: when its controls are shown, or -1 */
+double g_fg_hint_from = -1;       /* Frame Generation on: when to look whether it can run, or -1 */
+std::string g_fg_hint;            /* what it needs, once looked at */
 unsigned g_wii_centrings = 0;
 double g_wii_centred_at = -100;
 
@@ -1566,6 +1687,60 @@ void draw_wii_hint()
     const float w = g_gfx.measure(Font::SemiBold, 26, text) + 70, h = 58, x = 960 - w * 0.5f, y = 1080 - 120;
     g_gfx.panel(x, y, w, h, rgba(0x0A1236, 0.82f * a), 0.9f, h * 0.5f, rgba(0x6BE3A8, 0.9f * a), 1.8f);
     g_gfx.text_mid(Font::SemiBold, 26, 960, y + h * 0.5f, rgba(0xF4F7FF, a), Align::Center, text);
+}
+
+/* A Triforce arcade game's cabinet buttons, for ten seconds once it's up. */
+void draw_arcade_hint()
+{
+    using namespace porpoise::ui;
+    if (g_arcade_hint_from < 0 || g_time < g_arcade_hint_from)
+        return;
+    const double age = g_time - g_arcade_hint_from;
+    if (age >= 10.0)
+    {
+        g_arcade_hint_from = -1;
+        return;
+    }
+    const float a = float(std::min({1.0, age * 3.0, (10.0 - age) * 2.0}));
+    const std::string text = tr("Touch pad: insert a coin   \xC2\xB7   L1: test menu   \xC2\xB7   L3 + R3: service");
+    const float w = g_gfx.measure(Font::SemiBold, 26, text) + 70, h = 58, x = 960 - w * 0.5f, y = 1080 - 120;
+    g_gfx.panel(x, y, w, h, rgba(0x0A1236, 0.82f * a), 0.9f, h * 0.5f, rgba(0xFFC85C, 0.9f * a), 1.8f);
+    g_gfx.text_mid(Font::SemiBold, 26, 960, y + h * 0.5f, rgba(0xF4F7FF, a), Align::Center, text);
+}
+
+/* Frame Generation on but kept from running by the setup (not by the game):
+ * what it needs, once, for eight seconds, a few seconds into the game. */
+void draw_fg_hint()
+{
+    using namespace porpoise::ui;
+    if (g_fg_hint_from < 0 || g_time < g_fg_hint_from)
+        return;
+    if (g_fg_hint.empty())
+    {
+        const porpoise::framegen::Stats st = porpoise::framegen::stats();
+        if (st.state == porpoise::framegen::State::NoRoom && st.game_fps > 45.0)
+            g_fg_hint = tr("Frame Generation needs 120 Hz for a 60 fps game: set the PS5's resolution to 1440p or 4K");
+        else if (st.state == porpoise::framegen::State::NeedsVsync)
+            g_fg_hint = tr("Frame Generation needs V-Sync on");
+        else if (st.state == porpoise::framegen::State::Unavailable)
+            g_fg_hint = tr("Frame Generation couldn't start on this console");
+        if (g_fg_hint.empty())
+        {
+            g_fg_hint_from = -1; /* it runs, or the game decides: nothing to say */
+            return;
+        }
+        g_fg_hint_from = g_time;
+    }
+    const double age = g_time - g_fg_hint_from;
+    if (age >= 8.0)
+    {
+        g_fg_hint_from = -1;
+        return;
+    }
+    const float a = float(std::min({1.0, age * 3.0, (8.0 - age) * 2.0}));
+    const float w = g_gfx.measure(Font::SemiBold, 26, g_fg_hint) + 70, h = 58, x = 960 - w * 0.5f, y = 1080 - 120;
+    g_gfx.panel(x, y, w, h, rgba(0x0A1236, 0.82f * a), 0.9f, h * 0.5f, rgba(0x5CD3FF, 0.9f * a), 1.8f);
+    g_gfx.text_mid(Font::SemiBold, 26, 960, y + h * 0.5f, rgba(0xF4F7FF, a), Align::Center, g_fg_hint);
 }
 
 /* Developer options: the FPS overlay with the frame's times (Detailed Frame
@@ -2300,48 +2475,51 @@ void launch_frame(bool core_frame, double fps, void *)
     if (g_play.motion_readout && g_play.developer && !g_menu_open)
         draw_motion_readout();
     if (!g_menu_open)
+    {
         draw_wii_hint();
+        draw_arcade_hint();
+        if (g_arcade_hint_from < 0)
+            draw_fg_hint();
+    }
     if (g_menu_open)
         g_app.draw_game_menu(g_time);
     g_app.draw_curtain(g_curtain);
 }
 
-/* The start: Porpoise's mark fades in on black, and stays while the library
- * is read; the launcher's first frames lift the curtain off it. */
+/* When the console's launch screen was hidden: it fades into Porpoise, and the
+ * app's sound comes up only after it (Oct 24: the boot's hum came in partway,
+ * on headphones too). The boot waits for that. */
+long long g_splash_hidden_ns = 0;
+
+/* The start: the boot's sonar screen, at rest, while the library is read
+ * (the boot itself starts with the launcher: ui_app_boot.cpp). */
 void show_boot_mark()
 {
-    porpoise::ui::Texture *mark = g_gfx.texture_file(PORPOISE_APP "/assets/brand/logo.png");
     g_pacer.start(porpoise::vk::refresh_hz(), "boot");
-    const float hz = float(porpoise::vk::refresh_hz() > 10 ? porpoise::vk::refresh_hz() : 60.0);
-    /* The black, then the dolphin rising out of it with a soft glow. */
-    const int frames = int(hz * 0.55f); /* 2.7: 0.9 s before */
-    for (int frame = 0; frame <= frames; ++frame)
+    for (int frame = 0; frame < 2; ++frame)
     {
-        const float t = float(frame) / float(frames);
-        const float a = t * t * (3.0f - 2.0f * t);
         begin_ui_frame(0.0f);
-        g_gfx.panel(-20, -20, 1960, 1120, porpoise::ui::rgba(0x02040C), 1.0f, 0);
-        g_gfx.blob(960, 540, 900 * (0.6f + 0.4f * a), 900 * (0.6f + 0.4f * a), porpoise::ui::rgba(0x2F6BFF, 0.16f * a));
-        if (mark && mark->width > 0)
-        {
-            const float w = 220 * (0.92f + 0.08f * a), h = w * float(mark->height) / float(mark->width);
-            g_gfx.image(mark, 960 - w * 0.5f, 540 - h * 0.5f + 10.0f * (1.0f - a), w, h,
-                        porpoise::ui::rgba(0xFFFFFF, a));
-        }
-        porpoise::vk::present_clear(0.008f, 0.016f, 0.047f);
+        porpoise::ui::draw_boot_backdrop(g_gfx);
+        porpoise::vk::present_clear(0.004f, 0.024f, 0.035f);
         if (frame == 0)
+        {
             ps5::debug::mark_value("main: splash hidden", sceSystemServiceHideSplashScreen());
+            g_splash_hidden_ns = now_ns();
+        }
         g_pacer.frame_done();
     }
-    if (mark)
-        g_gfx.free_texture(mark);
-    g_curtain = 1.0f; /* lifted by the launcher's first frames */
+    g_curtain = 0.0f;
 }
 
 void leaving_game(float amount, void *)
 {
-    /* The menu stays under the curtain as it comes down, not gone at once. */
+    /* The menu stays under the curtain as it comes down, not gone at once.
+     * Then the screen holds while the game is saved for Quick Resume and
+     * Dolphin closes (no frames can be drawn meanwhile): it says so, so it
+     * doesn't look stuck. */
     g_curtain = amount;
+    g_app.set_curtain_note(porpoise::ui::tr(g_play.quick_resume ? "Saving your place\xE2\x80\xA6"
+                                                                : "Closing the game\xE2\x80\xA6"));
     if (amount >= 1.0f)
         g_menu_open = false;
 }
@@ -2358,12 +2536,13 @@ struct Entrance
     int steady = 0; /* frames in a row drawn in time */
 };
 Entrance g_entrance;
-constexpr double kEntranceMinHold = 0.2, kEntranceMaxHold = 3.0;
+constexpr double kEntranceMinHold = 0.2, kEntranceMaxHold = 1.5; /* (round 6: 3 s looked stuck) */
 constexpr double kEntranceLift = 0.5, kEntranceUiFrom = 0.2, kEntranceUi = 0.6; /* 2.7: quicker into the menus */
 constexpr float kEntranceRise = 28.0f;
 
 void start_entrance()
 {
+    g_app.set_curtain_note("");
     g_entrance = Entrance{};
     g_entrance.on = true;
     g_curtain = 1.0f;
@@ -2543,6 +2722,35 @@ int main(int argc, char **argv)
     mkdir(PORPOISE_APP "/porpoise", 0777);
     mkdir(PORPOISE_APP "/porpoise/covers", 0777);
 
+#ifndef PORPOISE_DESKTOP
+    {
+        /* Settings > Video > Refresh Rate (written below when it changes, read
+         * here before the display opens). VRR: the driver is shown Porpoise's
+         * declaration without its 120 Hz bit (it would take VRR's long
+         * refreshes for 60 Hz and put the output back), and Porpoise puts
+         * the output at 120 Hz itself. */
+        char mode[16] = {0};
+        if (std::FILE *f = std::fopen(PORPOISE_APP "/porpoise/refresh.txt", "r"))
+        {
+            if (!std::fgets(mode, sizeof mode, f))
+                mode[0] = 0;
+            std::fclose(f);
+        }
+        /* Either way Porpoise puts the output at 120 Hz itself: the driver
+         * checks 120 Hz by timing a bare refresh, which under the PS5's VRR
+         * takes the TV's slowest (48 Hz), and put 60 Hz back - with VRR on,
+         * the TV never got 120. */
+        const char *const driver_param = PORPOISE_APP "/porpoise/videoout-param.json";
+        if (std::FILE *f = std::fopen(driver_param, "w"))
+        {
+            std::fputs("{\n  \"attribute3\": 262144\n}\n", f);
+            std::fclose(f);
+        }
+        setenv("PS5_VIDEOOUT_PARAM_JSON", driver_param, 1);
+        porpoise::vk::set_own_high_rate(true);
+        ps5::debug::mark(std::strncmp(mode, "vrr", 3) == 0 ? "main: Refresh Rate: VRR" : "main: Refresh Rate: fixed 120 Hz");
+    }
+#endif
     if (!porpoise::vk::open_display())
     {
         ps5::debug::mark("main: no display; nothing can be shown");
@@ -2553,12 +2761,16 @@ int main(int argc, char **argv)
      * with Porpoise's first frame (show_boot_mark), so there is no black gap. */
     porpoise::pad::open();
     porpoise::audio::open();
+    porpoise::move::start(); /* Move test builds: the PlayStation Move as player 1's Wii Remote */
 
     choose_data_dir();
     mark_start("start: player data found, ms");
     porpoise::ui::set_header_cache(g_data + "/disc-cache.tsv");
     g_settings.load(g_settings_path);
     g_settings.stay_sandboxed = g_stay_sandboxed; /* kept in /app0/porpoise, not settings.ini */
+    /* The debug folder: the app's log from here, and a crash last time filed. */
+    porpoise::debuglog::start(g_data, PORPOISE_APP "/trace.txt", g_settings.debug_logs);
+    porpoise::debuglog::app("Porpoise started: %s", PS5_RETROARCH_BUILD_ID);
     {
         /* Network shares: connected only when something on them is read. */
         std::vector<porpoise::netfs::Share> shares;
@@ -2706,6 +2918,8 @@ int main(int argc, char **argv)
         else
             g_app.start_welcome();
     }
+    else if (g_settings.setup_checked && !g_settings.welcome_45)
+        g_app.start_welcome(true); /* 4.5: a new look, offered once */
     if (porpoise::ui::look::kChannel != porpoise::ui::look::Channel::Release &&
         g_settings.testing_notice != porpoise::ui::look::kNoticeId)
         g_app.show_testing_notice(); /* after anything below */
@@ -2745,10 +2959,25 @@ int main(int argc, char **argv)
         g_app.show_message(porpoise::ui::tr("Forwarded game not found"),
                            porpoise::ui::trf("Porpoise was asked to start {path}, but can't find that file.",
                                              {{"path", forwarded_missing}}));
-    start_entrance(); /* the music comes up with the menus */
+    if (forwarded_game || g_settings.reduced_motion)
+        start_entrance(); /* the music comes up with the menus */
+    else
+    {
+        /* The boot, Sonar (ui_app_boot.cpp): the menus come up under it, and
+         * the music when it says. */
+        g_curtain = 0.0f;
+        g_app.set_intro(0.0f, kEntranceRise);
+        porpoise::sound::fade_music(0.0f, 0.0f);
+        g_app.start_boot(!new_look_music(g_settings.ui_theme));
+    }
     fetch_covers();
 
-    const double hz = porpoise::vk::refresh_hz();
+    /* The menus at the TV's own rate: 119.88 frames a second when Porpoise
+     * outputs 120 Hz (the PS5 at 1440p or 4K on a 120 Hz TV, V-Sync on, no
+     * VRR), for quicker, smoother menus; otherwise 60. Games keep their own. */
+    const double tv_hz = porpoise::pacer::measure_display();
+    const double hz = g_settings.vsync && tv_hz > 100.0 && tv_hz < 130.0 ? tv_hz : porpoise::vk::refresh_hz();
+    ps5::debug::mark_value("main: the menus' frames a second", int(hz + 0.5));
     g_pacer.start(hz, "launcher");
     porpoise::ui::Game *relaunch = nullptr; /* left to start afresh (in-game Apply) */
     for (;;)
@@ -2828,11 +3057,51 @@ int main(int argc, char **argv)
             last_frame_ns = frame_now;
             if (entrance_frame(dt, frame_ms))
                 in = porpoise::ui::Input{}; /* the menus aren't on screen yet */
+            {
+                /* The boot starts once frames come on time and the first
+                 * pictures are in (as the entrance waits): a hitch mid-way would
+                 * show. At most a little over a second. */
+                static int boot_quiet = 0, boot_steady = 0;
+                static double boot_held = 0;
+                bool ready = false;
+                if (g_app.boot_on())
+                {
+                    boot_held += dt;
+                    boot_quiet = g_gfx.loading() ? 0 : boot_quiet + 1;
+                    boot_steady = frame_ms < 1500.0 * dt ? boot_steady + 1 : 0;
+                    /* ...and the console's sound is up (measured: the hum started
+                     * 0.3 s after its launch screen went and the first of it went
+                     * unheard; at 1.6 s, a little still was) */
+                    const double since_splash = g_splash_hidden_ns ? (now_ns() - g_splash_hidden_ns) / 1e9 : 9.0;
+                    ready = ((boot_quiet >= 8 && boot_steady >= 12) || boot_held >= 1.2) && since_splash >= 2.6;
+                    static bool told = false;
+                    if (ready && !told && (told = true))
+                        ps5::debug::mark_value("main: boot starts, ms after the launch screen went",
+                                               (long long)(since_splash * 1000));
+                }
+                if (g_app.boot_frame(in, ready))
+                    in = porpoise::ui::Input{}; /* (the boot keeps them: any button skips it ahead) */
+            }
+            if (const int boot = g_app.take_boot_events())
+            {
+                if (boot & porpoise::ui::App::kBootSkipped)
+                {
+                    porpoise::sound::stop(porpoise::sound::Effect::BootSonar);
+                    porpoise::sound::stop(porpoise::sound::Effect::BootSonarLegacy);
+                }
+                if (boot & porpoise::ui::App::kBootMusic)
+                    porpoise::sound::fade_music(1.0f, 2.6f);
+            }
             take_search();
             g_app.set_searching(g_search.state.load(std::memory_order_relaxed) != 0);
             const auto action = g_app.update(in, dt);
+            /* The menu music follows the look: Soundscape for the new one, Porpoise's
+             * original for the legacy looks (it changes as the welcome's cards do). */
+            porpoise::sound::set_music_track(new_look_music(g_settings.ui_theme) ? 1 : 0);
             if (action == porpoise::ui::App::Action::SettingsChanged)
             {
+                porpoise::debuglog::set_on(g_settings.debug_logs);
+                porpoise::debuglog::app("settings: changed and saved");
 #ifndef PORPOISE_DESKTOP
                 porpoise::jailbreak::set_stay(g_settings.stay_sandboxed);
 #endif
@@ -2944,6 +3213,7 @@ int main(int argc, char **argv)
             }
             begin_ui_frame(0.0f);
             g_app.draw(g_time);
+            g_app.draw_boot();
             if (g_curtain > 0.0f)
                 g_app.draw_curtain(g_curtain); /* the entrance (entrance_frame) */
             porpoise::vk::present_clear(0, 0, 0);
@@ -2986,10 +3256,14 @@ int main(int argc, char **argv)
                 ws_revision = header[7];
             ps5::debug::mark_value("main: disc revision (its widescreen code is per revision)", ws_revision);
         }
-        const porpoise::ui::widescreen::Plan ws_plan = porpoise::ui::widescreen::plan_for(
+        porpoise::ui::widescreen::Plan ws_plan = porpoise::ui::widescreen::plan_for(
             g_play.wide_mode(),
             porpoise::ui::widescreen::kind_of(launch->id, PORPOISE_APP "/system/dolphin-emu/Sys", ws_wii, ws_revision),
             porpoise::ui::widescreen::code_needs_hack(launch->id));
+        /* The arcade games are 4:3 cabinets: no widescreen code or hack meant
+         * for GameCube discs (Dolphin keeps them 4:3 too). */
+        if (launch->kind == "Triforce")
+            ws_plan = porpoise::ui::widescreen::Plan::Standard;
         static_assert(int(porpoise::ui::widescreen::Plan::Patch) == 1 && int(porpoise::ui::widescreen::Plan::Hack) == 3 &&
                           int(porpoise::ui::widescreen::Plan::PatchHack) == 4 &&
                           int(porpoise::ui::widescreen::Plan::Universal) == 5,
@@ -3066,6 +3340,19 @@ int main(int argc, char **argv)
         g_controller_speakers = controller_speakers;
         porpoise::audio::set_buffer(g_play.audio_buffer);
         porpoise::audio::set_stretching(g_play.audio_stretch);
+        /* A Triforce arcade game: straight in (the arcade board has no
+         * GameCube start-up), with the player's own SegaBoot where the core
+         * looks for it, for the test menu. */
+        const bool arcade = launch->kind == "Triforce";
+        if (arcade)
+        {
+            install_segaboot();
+            if (g_play.gc_bios)
+            {
+                g_play.gc_bios = false;
+                g_play.write_core_options(g_options_path);
+            }
+        }
         /* The GameCube's start-up: only from the player's own BIOS, put where
          * Dolphin looks for the game's region; without one, straight in. */
         if (g_play.gc_bios && launch->platform != "Wii" && !install_ipl(*launch))
@@ -3246,12 +3533,13 @@ int main(int argc, char **argv)
         porpoise::pad::set_wii_buttons(g_play.wii_buttons_in_use());
         porpoise::pad::set_rumble_enabled(g_play.rumble);
         apply_game_controls(g_play.console == 2 || (g_play.console == 0 && launch->platform == "Wii"));
-        g_app.begin_launch(launch);
+        g_app.begin_launch(launch, g_time); /* the entrance on the clock it's drawn with */
         /* The music fades as the screen dims; the Play sound finishes. */
         porpoise::sound::fade_music(0.0f, 0.5f);
         /* From a home screen tile there is no library to fade from: the game
          * starts loading at once, under the launch screen. */
-        const int launch_frames = forwarded_session ? 2 : std::max(36, int(hz * 0.6));
+        const int launch_frames =
+            forwarded_session ? 2 : std::max(36, int(hz * (g_app.launch_intro_length() + 0.1)));
         for (int frame = 0; frame < launch_frames; ++frame)
         {
             g_time += 1.0 / hz;
@@ -3300,6 +3588,9 @@ int main(int argc, char **argv)
         playback.audio_buffer_ms = g_play.audio_buffer_ms();
         playback.audio_fill = g_play.audio_fill;
         g_wii_hint_from = g_time + 2.0; /* once the game is up */
+        g_arcade_hint_from = arcade ? g_time + 3.0 : -1; /* (a Triforce game's cabinet buttons) */
+        g_fg_hint_from = g_play.frame_gen ? g_time + 13.0 : -1; /* (whether frame generation can run) */
+        g_fg_hint.clear();
         g_wii_centrings = 0;
         const std::string debug_dir = g_data + "/debug";
         /* A Wii game's every socket call in core.log: for reports only. */
@@ -3307,20 +3598,28 @@ int main(int argc, char **argv)
             setenv("PORPOISE_NET_LOG", "1", 1);
         else
             unsetenv("PORPOISE_NET_LOG");
+        /* This play's own folder in the debug folder (games/<game>/<date-time>/):
+         * the motion file goes there too. */
+        g_game_debug_dir = porpoise::debuglog::begin_game(launch->title, launch->id, launch->platform);
+        {
+            porpoise::debuglog::PerfContext pc;
+            pc.resolution = g_play.resolution;
+            pc.output_res = g_play.output_res;
+            pc.dual_core = g_play.dual_core;
+            pc.own_cores = g_play.own_cores;
+            pc.fast_float = g_play.fast_float;
+            pc.wait_shaders = g_play.wait_shaders;
+            pc.frame_gen = g_play.frame_gen;
+            pc.vsync = g_play.vsync;
+            pc.shader_mode = g_play.shader_mode;
+            pc.audio_buffer = g_play.audio_buffer;
+            porpoise::debuglog::perf_context(pc);
+        }
         if (g_settings.debug_logs)
         {
-            playback.debug_dir = debug_dir.c_str();
-            playback.motion_log = g_settings.developer && g_settings.motion_logs;
-            mkdir(debug_dir.c_str(), 0777);
-            if (std::FILE *f = std::fopen((debug_dir + "/README.txt").c_str(), "w"))
-            {
-                std::fputs("Porpoise's debug folder (turn it off in Settings > Console > Debug logs).\n\n"
-                           "WiimoteNew.ini  The Wii Remote set-up Dolphin was given for the last Wii game.\n\n"
-                           "Send it with /data/homebrew/PPSA99764/trace.txt and "
-                           "/data/homebrew/PPSA99764/porpoise/core.log when you report a problem.\n",
-                           f);
-                std::fclose(f);
-            }
+            playback.debug_dir = g_game_debug_dir.empty() ? debug_dir.c_str() : g_game_debug_dir.c_str();
+            playback.motion_log = true;
+            mkdir(debug_dir.c_str(), 0777); /* (its README: porpoise_debuglog) */
         }
         if (playback.wii.active)
             ps5::debug::mark_value("main: Wii game; Wii controller", playback.wii.controller);
@@ -3360,12 +3659,34 @@ int main(int argc, char **argv)
             float adjust[4];
             g_play.picture_adjust(adjust);
             porpoise::vk::set_picture_adjust(adjust[0], adjust[1], adjust[2], adjust[3]);
+            float crop[4];
+            g_play.crop(crop);
+            porpoise::vk::set_crop(crop);
         }
         const long long played_from = now_ns();
 #ifdef PORPOISE_DESKTOP
         porpoise::platform::set_in_game(true);
 #endif
+        {
+            /* What it was started with, for the game's log. */
+            const auto &w = playback.wii;
+            porpoise::debuglog::game("file: %s", launch->path.c_str());
+            porpoise::debuglog::game("wii: active %d controller %d move %d pointer %d grip %d speed %d smooth %d reach %d "
+                                     "swing %d shake %d motion_plus %d screen %.3f x %.3f range %.2f",
+                                     w.active ? 1 : 0, w.controller, w.move ? 1 : 0, w.pointer, w.grip, w.speed, w.smooth,
+                                     w.reach, w.swing, w.shake ? 1 : 0, w.motion_plus ? 1 : 0, double(w.half_x),
+                                     double(w.half_y), double(w.range));
+            porpoise::debuglog::game("move: ball color %d, camera %s", g_settings.move_color,
+                                     g_settings.ps3_eye ? "on" : "off");
+            porpoise::debuglog::game("state: %s", start_state.empty() ? "(start fresh)" : start_state.c_str());
+        }
         const porpoise::core::Exit exit = porpoise::core::run_game(launch->path.c_str(), core_paths, hooks, playback);
+        if (porpoise::vk::virtual_vblank_hz() > 0)
+            porpoise::vk::set_virtual_vblank(0); /* (the menus: VRR's own way again) */
+        porpoise::debuglog::end_game(g_core_log, exit == porpoise::core::Exit::Failed
+                                                     ? ("didn't start: " + porpoise::core::last_failure_reason()).c_str()
+                                                 : exit == porpoise::core::Exit::Home ? "to the home screen"
+                                                                                      : "back to the library");
         if (!g_boot_marker.empty())
         {
             /* Left (or failed) before the first picture: not a stall, so the
@@ -3463,3 +3784,4 @@ extern "C" void catchReturnFromMain(int status)
 {
     leave(status);
 }
+

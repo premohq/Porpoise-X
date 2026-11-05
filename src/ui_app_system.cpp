@@ -201,6 +201,7 @@ App::Action App::start_menu(int menu, const Game *disc, const std::string &gc_re
     sysmenu_game_.boot_disc = disc != nullptr;
     /* Its own cover and art stay with the library's copy. */
     sysmenu_game_.cover = sysmenu_game_.disc = sysmenu_game_.back = sysmenu_game_.spine = nullptr;
+    sysmenu_game_.cover_old = sysmenu_game_.disc_old = sysmenu_game_.back_old = sysmenu_game_.spine_old = nullptr;
     if (!disc)
     {
         sysmenu_game_.platform = menu == 1 ? "GameCube" : "Wii";
@@ -315,7 +316,7 @@ void App::draw_system()
         return;
     SystemPanel &p = sys_;
     Gfx &g = *g_;
-    p.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, p.anim + 1.0f / 10.0f);
+    p.anim = settings_ && settings_->reduced_motion ? 1.0f : std::min(1.0f, p.anim + float(ui_dt_) * 6.0f); /* (open in 1/6 s, at 60 or 120 Hz) */
     const float t = ease_out(p.anim);
     g.set_layer();
     g.panel(0, 0, 1920, 1080, rgba(0x02040C, 0.62f * t), 1, 0);
@@ -373,7 +374,7 @@ void App::draw_system()
     else
     {
         const int top = std::clamp(p.row - visible / 2, 0, std::max(0, n - visible));
-        p.scroll = smooth(p.scroll, float(top), 1.0 / 60.0, 18.0f);
+        p.scroll = smooth(p.scroll, float(top), ui_dt_, 18.0f);
         for (int i = 0; i < n; ++i)
         {
             const float ry = ly + (float(i) - p.scroll) * row_h;

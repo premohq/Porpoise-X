@@ -41,6 +41,12 @@ struct Texture
     VkDeviceMemory staging_memory[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     void *staging_mapped[2] = {nullptr, nullptr};
     int pending = -1;
+    /* Its two strongest colours (a cover's, for the room Porpoise lights with
+     * them), 0..1 RGB: tone[0..2] the main one, tone[3..5] the other. */
+    float tone[6] = {0.10f, 0.30f, 0.60f, 0.30f, 0.20f, 0.60f};
+    /* The colour down its left and right edges, 0..1 RGB (a case's spine:
+     * the plastic's colour, when the case is coloured to match). */
+    float edge[3] = {1, 1, 1};
     /* Made by texture_file_async: its first copy goes in from staging[0]
      * (from no layout), and the staging buffer is let go after it. */
     bool fresh = false;
@@ -243,6 +249,13 @@ public:
     bool toned() const { return tone_; }
     /* Panels drawn plain (no liquid glass) while set: a screen, a sticker. */
     void set_solid(bool solid) { solid_ = solid; }
+    /* Thin glass's presence (0..1): fades a frosted panel in and out as a whole. */
+    void set_presence(float a) { presence_ = a < 0 ? 0 : a > 1 ? 1 : a; }
+    bool solid() const { return solid_; }
+    float frame_time() const { return time_; } /* the time begin() was given */
+    /* Small text drawn a little heavier (0 none; Gfx::text). */
+    void set_text_boost(float b) { text_boost_ = b; }
+    float target_width() const { return target_w_; } /* the picture's width, in pixels */
     Color tone(Color c) const;
 
     /* Where a picture was drawn: the largest place it took in the last
@@ -270,6 +283,8 @@ public:
      * a face button's ring is about two thirds of the cell). */
     void icon(Icon i, float cx, float cy, float size, Color c);
     bool has_icons() const { return icons_ != nullptr; }
+    /* The filled button icons (buttons-solid.png) instead of the outlined ones. */
+    void set_solid_icons(bool on) { solid_icons_ = on; }
     /* Part of a texture: uv is u0 v0 u1 v1. */
     void image_part(Texture *t, float x, float y, float w, float h, const float uv[4], Color tint = {},
                     float radius = 0);
@@ -390,6 +405,9 @@ private:
     Texture *white_ = nullptr;
     Texture *atlas_ = nullptr;
     Texture *icons_ = nullptr;
+    Texture *icons_solid_ = nullptr; /* buttons-solid.png: the Porpoise look's */
+    bool solid_icons_ = false;
+    float presence_ = 1.0f;
     Texture *brand_mask_ = nullptr;
     std::vector<Texture *> textures_;
     /* Freed, waiting for the GPU: the UI frame and the present (record())
@@ -434,6 +452,7 @@ private:
     unsigned slot_ = 0;
     float target_w_ = 1920, target_h_ = 1080;
     float time_ = 0, dim_ = 0;
+    float text_boost_ = 0;
     float layer_dx_ = 0, layer_dy_ = 0, layer_fade_ = 1;
     Texture *watch_tex_ = nullptr;
     float watch_cur_[4] = {0, 0, 0, 0}, watch_last_[4] = {0, 0, 0, 0}; /* x y w h */
@@ -453,6 +472,10 @@ private:
     std::vector<Vertex> vertices_;
     std::vector<Batch> batches_;
     bool overflowed_ = false;
+public:
+    std::size_t quads() const { return vertices_.size() / 6; } /* drawn so far this frame */
+    bool overflowed() const { return overflowed_; }
+private:
 
 #define PORPOISE_UI_VK_FUNCS(X)                                                                  \
     X(vkCreateBuffer) X(vkDestroyBuffer) X(vkGetBufferMemoryRequirements) X(vkAllocateMemory)    \

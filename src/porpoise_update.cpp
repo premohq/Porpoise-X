@@ -420,6 +420,26 @@ void *install_worker(void *)
             undo("A file in the download is damaged. Nothing was changed.");
             return nullptr;
         }
+        if (rel == "sce_sys/param.json")
+        {
+            /* Settings > Video > Refresh Rate: VRR keeps its own declaration
+             * (0x40040) through an update, not the shipped one (0x80040). */
+            char mode[16] = {0};
+            if (std::FILE *r = std::fopen((g_app + "/porpoise/refresh.txt").c_str(), "r"))
+            {
+                if (!std::fgets(mode, sizeof mode, r))
+                    mode[0] = 0;
+                std::fclose(r);
+            }
+            std::string text(body.begin(), body.end());
+            const std::string from = "\"attribute3\": 524352", to = "\"attribute3\": 262208";
+            const std::size_t at = text.find(from);
+            if (std::strncmp(mode, "vrr", 3) == 0 && at != std::string::npos)
+            {
+                text.replace(at, from.size(), to);
+                body.assign(text.begin(), text.end());
+            }
+        }
         const std::string target = g_app + "/" + rel, part = target + ".new";
         make_dirs(target);
         std::FILE *f = std::fopen(part.c_str(), "wb");

@@ -20,12 +20,12 @@
 
 namespace porpoise::ui::look
 {
-constexpr const char *kVersion = "4.0";
-constexpr int kBuild = 0; /* a release named "... (build N)" with a higher N is newer */
-constexpr int kVersionMajor = 4, kVersionMinor = 0, kVersionPatch = 0;
+constexpr const char *kVersion = "4.5";
+constexpr int kBuild = 1; /* a release named "... (build N)" with a higher N is newer */
+constexpr int kVersionMajor = 4, kVersionMinor = 5, kVersionPatch = 0;
 /* 0 for a final release; its betas (1, 2...) come before it, and its alphas
  * before those (-1000 + n: alpha 1 is -999), as porpoise::update reads tags. */
-constexpr int kVersionBeta = 0; /* 4.0 (0: the release) */
+constexpr int kVersionBeta = 0; /* 4.5 (0: the release) */
 /* A test build's tag: shown by the logo, and in a notice at the first start
  * of each such build. Release for neither. */
 enum class Channel
@@ -34,7 +34,7 @@ enum class Channel
     Beta,
     Alpha,
 };
-constexpr Channel kChannel = Channel::Release;
+constexpr Channel kChannel = Channel::Release; /* 4.5 */
 /* This build, for the notice: shown again when any of these change. */
 constexpr int kNoticeId = (((((kVersionMajor * 10 + kVersionMinor) * 10 + kVersionPatch) * 100 + kVersionBeta) * 100 +
                             kBuild) * 4 + int(kChannel));
@@ -63,6 +63,7 @@ enum RowAction
     kRowDeveloperOff,
     kRowReinitialize, /* Interface > Reinitialize Porpoise: settings wiped, the first start again */
     kRowCoversAgain,  /* Games > Download covers again (every game), or a game's own in its settings */
+    kRowCoversNow,    /* Downloads > Get Covers and Info Now: what's missing, at once */
     kRowDiagnostic,   /* About > Diagnostic test: what Porpoise can see and do, saved with the logs */
     kRowForwarder,    /* a game's settings > Home screen: make (or remake) its home screen tile */
     kRowTileArt,      /* a game's settings > Home screen: the tile art editor */
@@ -78,6 +79,7 @@ enum RowAction
     kRowSysUpdate,    /* Console > Wii System Update: the Wii's system software from Nintendo's servers */
     kRowAddCode,      /* a game's Cheats and Patches > Add a Code (ui_app_code.cpp) */
     kRowAllSettings,  /* 4.0: Show All Settings (Settings and a game's settings) */
+    kRowCredits,      /* 4.5: About > Credits: shows or folds away the credits */
 };
 
 /* Prompts with a keycap instead of a face-button glyph (draw_prompts). */

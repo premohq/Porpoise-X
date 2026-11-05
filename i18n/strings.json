@@ -7210,5 +7210,1617 @@
  {
   "en": "The GameCube controller port your controller is in. For the few games that want it in another port for a moment (Metal Gear Solid: The Twin Snakes); change it from the in-game menu while playing. GameCube games only.",
   "section": "4.0 Beta 2: simpler Settings, Auto Boost, Star Cube, Smooth Edges, Player 1's Port"
+ },
+ {
+  "en": "Closing the game…",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Frame Generation couldn't start on this console",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saving your place…",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Frame Generation needs 120 Hz for a 60 fps game: set the PS5's resolution to 1440p or 4K",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Frame Generation needs V-Sync on",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Touch pad: insert a coin   ·   L1: test menu   ·   L3 + R3: service",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} favorites",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move pointer off",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Mapping",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Shots",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move pointer on",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Controller Hub",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point, and pull T · hold Start to turn it off",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Favorites",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "States",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Menu",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold Start to turn it back on",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Main",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Wii Guide",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Welcome",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PlayStation Move disconnected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player 1 · charge it soon",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move battery low",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PlayStation Move connected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saving your place...",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player 1 is the DualSense again",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player 1 · Wii Remote",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move is on.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Nothing to calibrate",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Plug in the PS3 Eye and turn it on in Settings first.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Connected through Move Management",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point at the target and press Cross",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Ready to play",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Both DualSense controllers are on.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn on the PS3 Eye in Settings to see what it sees.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "RIGHT HAND",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote, one DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The DualSense plays as it.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Auto reads the controller's angle and which hand it's in, so tilts and swings come out the right way round.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Auto: reads it for you",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Five points done",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sit where you'll play and hold the controller the way you'll play.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move aims, and the PS3 Eye sees its ball.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Right stick, face buttons as the D-pad, R1, R2",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "All settings",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move + DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Open its page on your phone (your PS5's address, port 8095) and give the Move to {who}.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Template",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Top right",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PlayStation Move + DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Change buttons",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Light & rumble: way {n} works",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move in your hand like a Wii Remote, its light toward the TV. Hold Square a moment to center the pointer.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Start, on the side",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Bottom left",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Level it, then play",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Save as Template",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The GameCube's D-pad",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "D-pad right",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote + Nunchuk, Move and DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "SWING STRENGTH",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise's set",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player {n}",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Your own set: Change buttons to pick what each one does.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Balanced",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "YOUR TV",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Coming soon",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Motion and feel",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "DualSense in your right hand: its right stick is the Nunchuk's, the face buttons the D-pad",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A GameCube controller has nothing to calibrate.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "LAST SWING",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Press Cross the moment it turns green or buzzes.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PlayStation Move + Navigation",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Right stick, press",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Last swing: {what}",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move is on",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{who}'s controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move aims. The PS3 Eye is off: turn it on in Settings to follow the ball.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Connected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Steadiness",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saved for just this game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Both hands",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Z ",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Playing as: {what}",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "AS A CLASSIC CONTROLLER",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sensor bar",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Save over it",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Nunchuk",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise's set stays as it is, so there's always one that works. Pick Mine 1 or Mine 2 to make your own.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PlayStation Move",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Forget them ({n})",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "THE WII REMOTE",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Got it: the Move keeps that way.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Recommended for this game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Second controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Ready",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "C ",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Light toward the TV",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player 1 plays with two DualSense. Pick another second controller for Player 1 to give Player 2 their own.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Test & tune",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The second DualSense isn't on yet.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Plays as",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Set it up",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Navigation controller connects through Move Management by REXCRAFT88, which has to be running. Its stick is the Nunchuk's, L1 and L2 are C and Z.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Just this game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "What they hold",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "DualShock 4",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "T, underneath",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "AS A REMOTE, SIDEWAYS",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move isn't on: press its PS button.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Lamps or wall lights in the camera's view? Ignore other lights notes them while the ball is dark for a moment.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Slide a finger on the touch pad. Good for menus and slow games.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn their DualSense on. It joins as {who}. Light bar: {color}.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move aims. The PS3 Eye is on, looking for the ball.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Calibrate",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The camera looks everywhere again.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Watch the ball and feel the Move.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "THE WII REMOTE AND THE NUNCHUK",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "D-pad up",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The GameCube's",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} lights ignored",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Coming with real Wii Remotes",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise sees it held right",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "LIVE · THE MOVE",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Right stick",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Go straight in",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Navigation",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Bottom right",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Second DualSense: on.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold R1 a moment to center",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "LEFT HAND",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The GameCube controller's layout",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A Move plays as the Wii Remote. Pick DualSense to choose another Wii controller.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{where} · {n} of 5 · it captures by itself",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Two Controllers",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Speed",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote + Nunchuk, Move and Navigation",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold Square a moment to center",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point at the glowing dot and hold still.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Ignore other lights",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Right hand",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Something feels off? Your logs in the debug folder help: send them on the Discord.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "LIVE · THE DUALSENSE",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold the Move where the camera can see it.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Select, on the side",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The PlayStation controllers don't need a sensor bar: the gyro or the camera does its job. It stays here so you know where it will be.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Nunchuk hand",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{what} is available in a future update.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point at the middle first, then each corner. Hold still on each one and it's taken by itself.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Flick to shake",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn the Move on",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "That didn't look like a screen. Let's try again: the middle first.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Next: the five points",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Both hands, face up",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Shake the Remote",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Save for",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move in your left hand, its light toward the TV; the DualSense in your right, like a Nunchuk: its right stick, R1 and R2, and the face buttons as the D-pad. Hold Square a moment to center the pointer.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move's own motion aims. The camera shows where its ball is: keep it in view.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not signed in",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Flick",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Calibrate again",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "B Trigger",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Test & Tune",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold it still a moment.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pointer speed, steadiness and swing strength follow Player 1's.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Shake the Nunchuk",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Waiting for Move Management",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "AS A GAMECUBE CONTROLLER",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Main controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Every Wii game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Swing or flick the controller: the line shows how hard. Games count a swing once it's past the first line; Swing strength scales how hard the Move's swings land.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Available in a future update.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Touch pad, press",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Button set",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Upright, to the TV",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The DualSense plays as a GameCube controller: its buttons, no pointer or motion.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move, like a Wii Remote",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "It Lit Up or Buzzed",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pick up the controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The pointer is sized to your screen and how far you sit. Pointing at five points measures both at once; or give the size and the distance.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Swing strength",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The PS3 Eye follows it",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold Square a moment to center the pointer.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Snappy",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "It plays alongside Player 1 in every Wii game.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Waiting for their controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "How you hold it",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saved for every Wii game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "STRONG",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Light & rumble: none worked, send the log",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Save as template",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "As the Controller Hub has it. Change it there.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A template keeps the whole setup: the controllers, the pointer's calibration, feel, speed and swing strength. Pick it on the Controllers page next time.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The same on the Wii",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hold it",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote, the Move",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hits {h}   ·   Misses {m}",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "FLICK TO SHAKE",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Wii Remote",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Push the right stick to move it. No motion needed.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Played on the DualSense, for the games that want them.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote + Nunchuk, one DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Starting over: the middle first.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sign in another user on the PS5, or add a guest.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Check {n} of {all}",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Ball color",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "How to connect",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The light",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise sees it held this way.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Center (hold)",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Same as Player 1",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Light & rumble check",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Give the Navigation controller to {who} too.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Color",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PS button",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Noting the lights…",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point at the target and press the Move button",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Point at the glowing dot and hold still",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move in your right hand, its light toward the TV; the DualSense in your left, like a Nunchuk. Hold Square a moment to center the pointer.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not used",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Show the hub",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Other Wii controllers",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pointer speed",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remote + Nunchuk, two DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "For real Wii Remotes. The PlayStation controllers don't need one: the gyro or the camera does its job.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Feel",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "D-pad left",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saved setups",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Swing",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "MEDIUM",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Left stick, press",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Calibrate Again",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "DualSense in your other hand: the Nunchuk's stick",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move + Navigation",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Player 2's DualSense is Player 1's Nunchuk",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Left stick",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Top left",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "STEADINESS",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "IN YOUR HAND",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move's light goes off a moment: every other light the camera sees now is left out.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Stick, D-pad, L1, L2",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "C Button",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Second DualSense: not found. Sign in a second user and turn their controller on.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not done yet: about 30 seconds",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Touch pad",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pointing at Five Points",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "It sees the ball.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Before this game",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The left DualSense is the Nunchuk: its stick",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Like a GameCube controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Take This Point",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sign in {who}'s user on the PS5. Their DualSense is the Nunchuk.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Same DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A Move is the Wii Remote, with the Nunchuk when it has a second controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Navigation controller",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Left hand",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Five points, the whole screen",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn the controller on and pick it up.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Aim with",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn the controller to aim. Hold R1 a moment to center the pointer again.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The Move aims",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move button",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "For the PS3 Eye: turn it on in Settings.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pointer and motion settings follow Player 1's.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sit where you'll play and hold the Move the way you'll play, its light toward the screen.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Start Move Management by REXCRAFT88 with your payload loader.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "D-pad down",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Nothing happens? Wait: the next way comes by itself.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Second DualSense",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "DualSense disconnected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Re-center (hold)",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "DualSense connected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sees the ball",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Can't see the ball",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The PS3 Eye is off",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Turn it on in Wii Controllers",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Looking for the ball",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PS3 Eye off",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} folders",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} of {all} points",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Starting",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not plugged in",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Monday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "ACHIEVEMENTS",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "CONTROLLERS",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "ABOUT THE GAME",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Video and Audio",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "For this game only",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Your games, their covers, and where Porpoise keeps things",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "CAMERA",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Yesterday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} days ago",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sunday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not yet",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Wednesday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Thursday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "All",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Full Settings",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "This Screen",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} weeks ago",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "YOUR PLAY",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PS3 Eye",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Tuesday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Remove from Favorites",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Console and Online",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Off in Settings",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "No controllers",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saturday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Needs the ELF loader",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Friday",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} connected",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Saves and Screenshots",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A while ago",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "{n} changes waiting · Square applies them",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Charging",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Video and Graphics",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "CONNECTED",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Top",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Cuts this much off that edge; the rest fills the screen at its own shape. You see it as you change it, and it's kept for this game.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Frames per second, in a corner while you play.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Bottom",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trim the Game's Black Edges",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dolphin trims the black border some games draw round their picture (a thin bar at the sides of some widescreen games). Takes effect after a restart of the game.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Reset Tab",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "This tab is back to the settings every game uses.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Color and Border",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Crop",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Extra bloom, color and the border beside a 4:3 picture. Cross opens it.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trim the picture's edges: black bars a game draws, or a picture that doesn't quite fill the screen. Cross opens it.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "How a Wii game sees your DualSense. Remote + Nunchuk: the Nunchuk on the left stick and L1 / L2. Remote: held pointing at the TV, with its motion. Sideways: held like an NES pad, tilt to steer. Two controllers: the second DualSense is the Nunchuk. Otherwise every other controller is another player's own Wii Remote, with its own pointer and motion.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Looks on GameTDB.com now for the covers and game info Porpoise doesn't have yet, whatever the two settings above say. Needs the console online.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "PS3 Eye Camera",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dark",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A game with settings tested on PS5 gets them the first time you play it (and when they're updated), unless you've changed its settings yourself. Riptide Boost is never turned on by this.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "What your TV is running at. 120 Hz needs the PS5's Video Output resolution at 1440p or 4K and a 120 Hz TV. VRR needs Refresh Rate set to VRR, and VRR with Apply to Unsupported Games on in the PS5's Screen and Video settings.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Move Ball Color",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The legacy looks' menu music and the sound effects, made for Porpoise by Ruben.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Triforce SegaBoot",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Fixed 120 Hz",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Found",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Credits",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Fixed 120 Hz: with the PS5 at 1440p or 4K on a 120 Hz TV, Porpoise runs at 120 Hz and Frame Generation shows a 60 fps game at 120; the PS5's VRR stays off while Porpoise runs. VRR: each frame shows the moment it's ready, with no judder when a game dips below full speed, up to 120 Hz; turn on VRR and Apply to Unsupported Games in the PS5's Screen and Video settings. With Frame Generation on, Porpoise keeps an even 120 Hz beat for it. Takes effect the next time Porpoise starts.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A light tick on the DualSense as a menu follows your finger on the touch pad.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Crop Right",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trims the left edge of the picture. The in-game menu shows it as you change it.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The arcade board's own firmware (segaboot.gcm), for the arcade games' test menu: put your own in /data/porpoise/bios. The games play without it. Porpoise includes none.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dolphin hides the black borders some games draw at the edges.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The color the Move's ball lights up in. The PS3 Eye looks for that color only, so pick one your room doesn't have.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trims the top edge of the picture.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Performance Profiler",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Refresh Rate",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Not measured yet",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Wii Template",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "VRR, up to 120 Hz",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "VRR, up to 60 Hz",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A game you keep in two files (an ISO and an RVZ of it, say) shows once: the one you played last. A game on two discs still shows both.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Crop Left",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dark: the room lit by your game's colors. OLED Black: true black around the glow, for OLED TVs. Light: frosted white glass for a bright room.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "This game runs its own virtual memory. Dolphin maps it for speed, but on the PS5 few of its pages can be, and each change costs time. Turning this off may run the game faster and smooth out hitches when it loads new things. Nothing else changes.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Crop Top",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Everyone who made Porpoise possible: Cross shows them.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Looks for a PS3 Eye on the PS5's own USB ports, every few seconds, so you can plug it in or out at any time; the island and the menu say what it sees. It needs your jailbreak's ELF loader.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trims the bottom edge of the picture.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "How games are drawn, and HD texture packs",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "The consoles' own settings, and Wii games online",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "His Move Studio work shaped Porpoise's Move calibration: centering held still clears the gyroscope's drift, the Move starts fresh when it reconnects, the pointer snaps to the middle, the setup's center carries into the game, and the PS3 Eye looks for the ball's own color and leaves out the room's other lights. Players 2 to 4's Moves and every Navigation controller connect through his Move Management, read with his input client. github.com/REXCRAFT88",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "OLED Black",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Pick your main controller (the Wii Remote) and a second one (the Nunchuk), then calibrate the pointer with five points, try it in Test & Tune, and keep it all as a template.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Calibrated",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "For a report on a slow game: notes where the PS5's CPU spends its time while you play, in the debug logs. It costs a little speed. Takes effect when Porpoise starts again; turn it off after.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Everyone who made Porpoise possible. Cross folds them away again.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Cover Flow: your games as cases in a row, the chosen one in front. Rows: a grid of cases, the chosen one's details beside them.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Get Now",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A whole Wii controller setup kept under a name: saved from Wii Controllers (Save as template).",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Your PlayStation Move is player 1's Wii Remote: point with it, Move is A, T is B, Cross 1, Circle 2, Start +, Select -, PS Home. Hold Square a moment, still, to center the pointer (it also clears the gyroscope's drift). Calibrate once in the Controller Hub so the pointer fits your screen. The DualSense is the Nunchuk.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Keeps logs in /data/porpoise/debug, nothing sent anywhere: Porpoise's own, crashes, the Controller Hub's motion, and each game you play in a folder of its own. Save a Report gathers the newest.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Mode",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hide Duplicate Games",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Controller Ticks",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "A picture of the DualSense as each Wii controller, how to hold it and what every button does.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Save states, and pictures of your games",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dolphin keeps this game on one core. Turning this off runs it on two, kept in step (Sync GPU): often faster on PS5. If the game hangs or glitches, turn it back on.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Rows",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Crop Bottom",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Trims the right edge of the picture.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Getting covers and game info…",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Makes a frame between each two of the game's: a 30 fps game is shown at 60, and at 120 Hz (see Display) a 60 fps game at 120. Adds a little lag and can smear fast motion. Needs V-Sync, without VRR.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dolphin's own fix for this game: a slower, more careful texture cache. Turning it off uses the fast one: often much faster on PS5, though some textures may show wrong.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Hide",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Shows the Controller Hub when a Wii game starts; Triangle there plays straight away. A game can have its own choice in its settings.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Shows the Controller Hub when this game starts; Triangle there plays straight away.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "VRR (Beta)",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise 4.5 brings a new look. Pick the one you like best.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Choose a look. You can change it any time in Settings > Interface.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Or continue using the Porpoise Legacy theme",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Welcome to Porpoise 4.5",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Virtual Memory Mapping",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Dual Core in Step (Sync GPU)",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Sapphire glass in a grid room, the boxes in a cover flow, the tabs along the top.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Liquid glass lit by the colors of the game you're on, your games as real cases. Triangle opens the menu from anywhere.",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
+ },
+ {
+  "en": "Porpoise Legacy",
+  "section": "4.5: the new look, Controller Hub, PlayStation Move, players 2-4, Triforce, display"
  }
 ]

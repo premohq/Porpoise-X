@@ -10,6 +10,7 @@
  * because this console refuses a title's dlopen, and its imports are bound to
  * the title's symbols (build/core_imports.inc). */
 #include "porpoise_paths.hpp"
+#include "porpoise_debuglog.hpp"
 #include "porpoise_core.hpp"
 #include "porpoise_atomic.hpp"
 #ifdef PORPOISE_DESKTOP
@@ -718,9 +719,9 @@ std::size_t audio_batch(const int16_t *data, std::size_t frames)
  * Porpoise binds to that port's accelerometer (nunchuk_motion_step). */
 int remote_player(unsigned port)
 {
-    if (h.wii.controller == porpoise::pad::WiiTwoControllers)
-        return port <= 1 ? int(port) : -1;
-    return int(port);
+    /* (Two controllers: port 1's motion is player 1's Nunchuk, player 2's
+     * DualSense. 4.5 Beta 4: players 3 and 4 play on beside it.) */
+    return port < unsigned(porpoise::pad::kMaxPlayers) ? int(port) : -1;
 }
 
 bool RETRO_CALLCONV set_sensor_state(unsigned port, enum retro_sensor_action action, unsigned)
@@ -776,13 +777,34 @@ float RETRO_CALLCONV get_sensor_input(unsigned port, unsigned id)
     }
 }
 
-/* Which device each port gets: GameCube pads, or the chosen Wii controller. */
-unsigned port_device(int)
+bool nunchuk_device(int controller);
+
+/* Which device each port gets: GameCube pads, or that player's Wii controller
+ * (4.5 Beta 4: each player's own). */
+unsigned port_device(int port)
 {
     if (!h.wii.active)
         return RETRO_DEVICE_JOYPAD;
-    return h.wii.motion_plus ? porpoise::pad::wii_device_with_motion_plus(h.wii.controller)
-                             : porpoise::pad::wii_device(h.wii.controller);
+    const int controller = porpoise::pad::for_player(h.wii, port).controller;
+    return h.wii.motion_plus ? porpoise::pad::wii_device_with_motion_plus(controller)
+                             : porpoise::pad::wii_device(controller);
+}
+
+/* Two controllers: player 2's DualSense is player 1's Nunchuk, so port 1 has no
+ * Remote of its own. */
+bool nunchuk_port(int port)
+{
+    return port == 1 && h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
+}
+
+/* Some player's Remote has the Nunchuk: player 1's, or a player who's here
+ * (one whose saved choice has it but who never joined changes nothing). */
+bool any_nunchuk()
+{
+    for (int p = 0; p < porpoise::pad::kMaxPlayers; ++p)
+        if ((p == 0 || h.plugged[p]) && nunchuk_device(porpoise::pad::for_player(h.wii, p).controller))
+            return true;
+    return false;
 }
 
 /* A line for the debug folder's motion.csv: what the controller felt and
@@ -948,7 +970,7 @@ void set_core_option(const char *key, const char *value)
 /* Called once a frame; leave = a change of controller: start over. */
 void nunchuk_motion_step(bool leave = false)
 {
-    const bool want = h.wii.active && h.wii.motion && nunchuk_device(h.wii.controller);
+    const bool want = h.wii.active && h.wii.motion && any_nunchuk();
     if (leave && (h.nunchuk_stage == 1 || h.nunchuk_stage == 2))
     {
         set_core_option("dolphin_save_load_settings", "disabled");
@@ -1037,12 +1059,13 @@ int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id)
     if (player == 0 && h.hold_input)
         return 0;
     const bool two = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
-    if (two && port > 0)
-        return 0; /* both controllers are player 1's Remote and Nunchuk */
+    if (two && port == 1)
+        return 0; /* the first two controllers are player 1's Remote and Nunchuk */
     const porpoise::pad::State &pad = frame_pad(player);
     /* With two controllers the second is the Nunchuk: its buttons and stick. */
     const porpoise::pad::State &nunchuk_pad = frame_pad(1);
-    const std::uint16_t joypad = std::uint16_t(pad.joypad | (two ? nunchuk_pad.nunchuk : 0));
+    const bool with_nunchuk = two && port == 0; /* (players 3 and 4 have their own) */
+    const std::uint16_t joypad = std::uint16_t(pad.joypad | (with_nunchuk ? nunchuk_pad.nunchuk : 0));
     switch (device)
     {
     case RETRO_DEVICE_JOYPAD:
@@ -1071,7 +1094,7 @@ int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id)
         return 0;
     }
     case RETRO_DEVICE_ANALOG:
-        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT && two)
+        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT && with_nunchuk)
             return id == RETRO_DEVICE_ID_ANALOG_X ? nunchuk_pad.left_x : nunchuk_pad.left_y;
         {
             /* A stick turned around, for a game that moves the other way. */
@@ -1201,7 +1224,9 @@ void set_wii(const porpoise::pad::WiiConfig &config)
 {
     if (!h.wii.active)
         return;
-    const bool device_changed = config.controller != h.wii.controller || config.motion_plus != h.wii.motion_plus;
+    bool device_changed = config.motion_plus != h.wii.motion_plus;
+    for (int p = 0; p < porpoise::pad::kMaxPlayers; ++p)
+        device_changed |= porpoise::pad::for_player(config, p).controller != porpoise::pad::for_player(h.wii, p).controller;
     /* (the same device for the GameCube controller either way: re-plugged all the same, harmlessly) */
     h.wii = config;
     h.wii.active = true;
@@ -1595,9 +1620,8 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     h.p1_port = h.wii.active ? 0 : std::clamp(h.p1_port_want.load(), 0, porpoise::pad::kMaxPlayers - 1);
     for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
     {
-        const bool two = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
         const int player = player_of(unsigned(port));
-        h.plugged[port] = player == 0 || (porpoise::pad::connected(player) && !two);
+        h.plugged[port] = player == 0 || (porpoise::pad::playing(player) && !nunchuk_port(port));
         if (h.plugged[port])
             h.api.set_controller_port_device(unsigned(port), port_device(port));
     }
@@ -1692,7 +1716,18 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     /* Where a frame's time goes (the log every 10 s). */
     using PerfFn = unsigned (*)(double *, double *, double *);
     const auto perf_take = reinterpret_cast<PerfFn>(ps5_core_dlsym(h.library, "porpoise_perf_take"));
-    if (perf_take)
+    /* 4.6: the GPU's share, the shaders made while the game waited, one core or two. */
+    struct Perf2
+    {
+        double cpu_ms, cpu_max_ms, gpu_ms, gpu_wait_ms, shader_ms;
+        unsigned frames, shaders;
+        int single_core;
+    };
+    using Perf2Fn = unsigned (*)(Perf2 *, unsigned);
+    const auto perf_take2 = reinterpret_cast<Perf2Fn>(ps5_core_dlsym(h.library, "porpoise_perf_take2"));
+    if (perf_take2)
+        perf_take2(nullptr, 0); /* from now */
+    else if (perf_take)
         perf_take(nullptr, nullptr, nullptr); /* from now */
     if (const char *cpus = std::getenv("PORPOISE_VIDEO_THREAD_CPUS"))
     {
@@ -1739,6 +1774,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
      * SET_SYSTEM_AV_INFO when a PAL game goes 50 -> 60), so the check below
      * compares against this, not against h.fps. */
     double paced_hz = content_hz();
+    unsigned virtual_seen = porpoise::vk::virtual_vblank_changes();
     pacer.start(paced_hz, "game");
     porpoise::framegen::begin_game(playback.debug_dir);
     /* The frame statistics' second (frame generation's and the detailed FPS
@@ -1746,6 +1782,17 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     long long stat_start = monotonic_ns(), stat_run_ns = 0, stat_run_max_ns = 0, stat_present_ns = 0,
               stat_pace_ns = 0, stat_misses_at = 0;
     unsigned stat_frames = 0;
+    /* The debug folder's performance (a line a second): the longest frame, the
+     * stutters, the speed, Dolphin's threads (porpoise_perf_take, taken each
+     * second and summed for the 10-second log). */
+    const long long game_start_ns = monotonic_ns();
+    long long sec_last_frame = 0, sec_worst_ns = 0;
+    int sec_stutters = 0;
+    unsigned long long sec_samples_at = 0;
+    unsigned sec_frames_shown = 0;
+    long long sec_audio_wait_at = 0;
+    double win_cpu = 0, win_gpu = 0, win_cpu_max = 0;
+    unsigned win_steps = 0;
     long long window_start = monotonic_ns();
     unsigned long long window_frames = 0, window_samples = 0;
     long long window_audio_wait_us = 0;
@@ -1768,7 +1815,6 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
         publish_frame_pads();
         log_motion();
         /* A controller that joins mid-game is plugged into its GameCube port. */
-        const bool two_controllers = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
         /* 4.0: Player 1's Port changed (the in-game menu): player 1's
          * controller goes into its new port, out of the old one. */
         if (!h.wii.active && h.p1_port_want.load() != h.p1_port)
@@ -1777,7 +1823,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
             for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
             {
                 const int player = player_of(unsigned(port));
-                const bool want = player == 0 || porpoise::pad::connected(player);
+                const bool want = player == 0 || porpoise::pad::playing(player);
                 if (want != h.plugged[port])
                 {
                     h.plugged[port] = want;
@@ -1787,11 +1833,16 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
             ps5::debug::mark_value("core: player 1 in GameCube port", h.p1_port + 1);
         }
         for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
-            if (!h.plugged[port] && porpoise::pad::connected(player_of(unsigned(port))) && !two_controllers)
+            if (!h.plugged[port] && porpoise::pad::playing(player_of(unsigned(port))) && !nunchuk_port(port))
             {
                 h.plugged[port] = true;
                 h.api.set_controller_port_device(unsigned(port), port_device(port));
                 ps5::debug::mark_value("core: a controller joined; player", port + 1);
+                /* Their Remote has the Nunchuk: its motion is set up again,
+                 * with their port in it. */
+                if (h.wii.active && port > 0 &&
+                    nunchuk_device(porpoise::pad::for_player(h.wii, player_of(unsigned(port))).controller))
+                    nunchuk_motion_step(true);
                 if (h.log)
                     std::fprintf(h.log, "[porpoise] player %d joined\n", port + 1);
             }
@@ -1886,6 +1937,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
                     }
                 }
                 /* Quick resume: the game as it was left, for next time. */
+                const long long resume_from = monotonic_ns();
                 if (keep_resume)
                 {
                     const bool kept = save_state(resume_here);
@@ -1901,6 +1953,8 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
                             std::remove((old.substr(0, old.size() - 6) + ".png").c_str());
                     }
                     ps5::debug::mark(kept ? "core: quick resume kept" : "core: quick resume could not be kept");
+                    ps5::debug::mark_value("core: closing: quick resume saved, ms",
+                                           int((monotonic_ns() - resume_from) / 1000000));
                 }
                 break;
             }
@@ -1975,9 +2029,8 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
              * Two-controller play has only the Remote (port 0): the second
              * controller is its Nunchuk, not a second Remote. */
             h.wii_changed = false;
-            const bool two = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
             for (int port = 1; port < porpoise::pad::kMaxPlayers; ++port)
-                if (two && h.plugged[port])
+                if (nunchuk_port(port) && h.plugged[port])
                 {
                     h.api.set_controller_port_device(unsigned(port), RETRO_DEVICE_NONE);
                     h.plugged[port] = false;
@@ -2079,6 +2132,13 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
                 h.aspect = now_av.geometry.aspect_ratio;
             if (now_av.timing.fps > 10.0 && now_av.timing.fps < 200.0)
                 h.fps = now_av.timing.fps;
+            /* Frame generation turned on or off under VRR: the vblank the
+             * pacing waits on changed (its own clock, or none). */
+            if (porpoise::vk::virtual_vblank_changes() != virtual_seen)
+            {
+                virtual_seen = porpoise::vk::virtual_vblank_changes();
+                pacer.start(paced_hz, "game");
+            }
             if (std::fabs(content_hz() - paced_hz) > 0.5)
             {
                 char line[120];
@@ -2143,8 +2203,72 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
             stat_present_ns += pace_start - present_start;
             stat_pace_ns += t - pace_start;
             ++stat_frames;
+            {
+                /* The frame's length, frame to frame (a gap of a second or more is
+                 * the menu, not a stutter). */
+                const long long budget_ns = static_cast<long long>(1e9 / std::max(10.0, paced_hz));
+                if (sec_last_frame)
+                {
+                    const long long d = t - sec_last_frame;
+                    if (d < 1'000'000'000LL)
+                    {
+                        sec_worst_ns = std::max(sec_worst_ns, d);
+                        if (d > budget_ns * 3 / 2)
+                            ++sec_stutters;
+                    }
+                }
+                sec_last_frame = t;
+                ++sec_frames_shown;
+            }
             if (t - stat_start >= 1'000'000'000LL)
             {
+                {
+                    const double secs = double(t - stat_start) / 1e9;
+                    double cpu_ms = 0, cpu_max_ms = 0, gpu_ms = 0;
+                    Perf2 p2{};
+                    unsigned steps = 0;
+                    if (perf_take2)
+                    {
+                        steps = perf_take2(&p2, sizeof p2);
+                        cpu_ms = p2.cpu_ms, cpu_max_ms = p2.cpu_max_ms, gpu_ms = p2.gpu_ms;
+                    }
+                    else if (perf_take)
+                        steps = perf_take(&cpu_ms, &cpu_max_ms, &gpu_ms);
+                    win_cpu += cpu_ms * steps;
+                    win_gpu += gpu_ms * steps;
+                    win_cpu_max = std::max(win_cpu_max, cpu_max_ms);
+                    win_steps += steps;
+                    const unsigned long long samples = h.samples_in - sec_samples_at;
+                    sec_samples_at = h.samples_in;
+                    porpoise::debuglog::PerfSecond ps;
+                    ps.t = float((t - game_start_ns) / 1e9);
+                    ps.fps = float(sec_frames_shown / secs);
+                    ps.game_hz = float(paced_hz);
+                    ps.speed = float(pulling ? 100.0 * stat_frames * runs / secs / (h.fps > 10.0 ? h.fps : 60.0)
+                                             : 100.0 * samples / secs / std::max(1.0, double(h.sample_rate)));
+                    ps.worst_ms = float(sec_worst_ns / 1e6);
+                    ps.stutters = sec_stutters;
+                    ps.cpu_ms = float(cpu_ms);
+                    ps.cpu_max_ms = float(cpu_max_ms);
+                    ps.gpu_ms = float(gpu_ms);
+                    ps.gpu_wait_ms = float(p2.gpu_wait_ms);
+                    ps.shader_ms = float(p2.shader_ms);
+                    ps.shaders = int(p2.shaders);
+                    ps.single_core = p2.single_core != 0;
+                    const double n = std::max(1.0, double(stat_frames));
+                    ps.run_ms = float(stat_run_ns / 1e6 / n);
+                    ps.present_ms = float(stat_present_ns / 1e6 / n);
+                    ps.pace_ms = float(stat_pace_ns / 1e6 / n);
+                    ps.misses = int(pacer.misses_total() - stat_misses_at);
+                    ps.audio_wait_ms = float((window_audio_wait_us - sec_audio_wait_at) / 1000.0 / secs);
+                    sec_audio_wait_at = window_audio_wait_us;
+                    ps.fast = runs > 1;
+                    if (rate_checked)
+                        porpoise::debuglog::perf_second(ps);
+                    sec_worst_ns = 0;
+                    sec_stutters = 0;
+                    sec_frames_shown = 0;
+                }
                 const double n = double(stat_frames);
                 const long long misses = pacer.misses_total();
                 porpoise::framegen::note_loop(stat_run_ns / 1e6 / n, stat_run_max_ns / 1e6, stat_present_ns / 1e6 / n,
@@ -2189,8 +2313,12 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
             if (window_frames)
             {
                 const double n = double(window_frames);
-                double cpu_ms = 0, cpu_max_ms = 0, gpu_ms = 0;
-                const unsigned steps = perf_take ? perf_take(&cpu_ms, &cpu_max_ms, &gpu_ms) : 0;
+                /* (Dolphin's threads, from the seconds' takes) */
+                const double cpu_ms = win_steps ? win_cpu / win_steps : 0.0, cpu_max_ms = win_cpu_max,
+                             gpu_ms = win_steps ? win_gpu / win_steps : 0.0;
+                const unsigned steps = win_steps;
+                win_cpu = win_gpu = win_cpu_max = 0;
+                win_steps = 0;
                 std::fprintf(h.log,
                              "[porpoise] frame time: core %.1f ms (max %.1f; Dolphin's CPU thread %.1f ms, max %.1f, "
                              "video loop busy %.1f ms, %u steps), overlay %.1f ms, present %.1f ms, pacing %.1f ms\n",
@@ -2209,6 +2337,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
             window_frames = 0;
             window_samples = h.samples_in;
             window_audio_wait_us = 0;
+            sec_audio_wait_at = 0;
             window_present_wait_ms = 0;
             window_run_ns = window_hook_ns = window_present_ns = window_pace_ns = 0;
             window_run_max_ns = 0;
@@ -2217,6 +2346,15 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
 
     h.running = false;
     h.fast_forward = 1;
+    /* How long each part of closing takes, for the trace (closing felt slow). */
+    long long close_at = monotonic_ns();
+    auto close_step = [&](const char *what) {
+        const long long now = monotonic_ns();
+        char line[96];
+        std::snprintf(line, sizeof line, "core: closing: %s, %.0f ms", what, (now - close_at) / 1e6);
+        ps5::debug::mark(line);
+        close_at = now;
+    };
     porpoise::framegen::end_game();
     porpoise::mic::close_all(); /* no game listening any more */
     porpoise::speaker::stop();   /* before the core and its mixer go */
@@ -2224,6 +2362,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     porpoise::audio::set_pull_paused(false);
     porpoise::audio::set_fast_forward(false);
     porpoise::audio::flush();
+    close_step("sound and extras stopped");
     porpoise::vk::close();
     /* Everything Porpoise made on the core's device goes before the core
      * takes the device down with it. */
@@ -2232,12 +2371,17 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     porpoise::vk::close_device();
     if (h.hw.context_destroy)
         h.hw.context_destroy();
+    close_step("graphics closed");
     /* An unlock still on its way gets a few seconds before the game goes. */
     porpoise::ra::finish_game(h.library, 5000);
+    close_step("achievements");
     h.api.unload_game();
+    close_step("Dolphin stopped the game");
     porpoise::ra::end_game();
     h.api.deinit();
+    close_step("Dolphin shut down");
     unload_core();
+    close_step("core unloaded");
     ps5::debug::mark("core: game closed");
     if (h.log)
         std::fclose(h.log);

@@ -10,10 +10,6 @@
 </p>
 
 <p align="center">
-  <a href="https://recompstore.com/game/PPSA99764"><img alt="Get it on RecompStore" src="https://recompstore.com/assets/press/badge-dark.svg" height="56"></a>
-</p>
-
-<p align="center">
   <b>Porpoise</b> is a GameCube and Wii emulator for jailbroken PS5, built on
   <a href="https://dolphin-emu.org">Dolphin</a>, with its own launcher for the TV and the DualSense.
 </p>
@@ -39,18 +35,18 @@ graphics go through Vulkan on Mesa's RADV driver.
 It plays your own GameCube and Wii disc backups. It doesn't include any games,
 BIOS or firmware files.
 
-### New in 4.0
-- **Frame Generation (beta):** a 30 fps game shown at 60, or a 60 fps game at
-  120 with the PS5 at 120 Hz. **Steady 30 FPS** for games that swing between
-  30 and 60.
-- **Simpler Settings** with **Show All Settings** for everything, and **Auto
-  Boost**: a game's best PS5 settings in one press.
-- A calmer **Porpoise** theme, and **Star Cube** redone after the GameCube's
-  menu.
-- **Change Disc** in the in-game menu, **Player 1's Port**, and the **Smooth
-  Edges (FXAA)** filter.
-- Smoother quick saves, games with big shader caches that start again, and a
-  long list of fixes. The full list is in the [changelog](CHANGELOG.md).
+### New in 4.5
+- **A new look** built around your collection: disc cases you move through
+  with the stick, in Light, Dark or OLED, with a side menu (Triangle) and the
+  island (swipe down on the touch pad).
+- **PlayStation Move as the Wii Remote**, with a PS3 Eye to keep your aim
+  from drifting, and the **Controller Hub** to set up what you hold and what
+  it plays as.
+- **Up to four players** in Wii games; the Navigation controller and players
+  2 to 4's Moves through REXCRAFT88's Move Management.
+- **Triforce arcade games (beta)**, see [below](#triforce-arcade-games-beta).
+- **Refresh Rate:** Fixed 120 Hz or VRR, with Frame Generation working under
+  both. The full list is in the [changelog](CHANGELOG.md).
 
 ## Features
 
@@ -195,7 +191,7 @@ need; **Show All Settings**, the first row, brings back every option.
 
 | Section | What's inside |
 |---|---|
-| **Video** | **Output resolution** (*Match the PS5* by default, or 1080p, 1440p, 4K), **Frame Generation** (beta) and **Steady 30 FPS**, **Widescreen** (see [Widescreen](#widescreen)), aspect ratio, **border**, FPS overlay, V-Sync |
+| **Video** | **Output resolution** (*Match the PS5* by default, or 1080p, 1440p, 4K), **Refresh Rate** (Fixed 120 Hz or VRR), **Frame Generation** (beta) and **Steady 30 FPS**, **Widescreen** (see [Widescreen](#widescreen)), aspect ratio, **border**, FPS overlay, V-Sync |
 | **Enhancements** | Internal resolution (1080p by default), anti-aliasing (MSAA/SSAA), anisotropic filtering, the **screen filter** and its strength, **Extra Bloom**; under **Advanced Options**, saturation, contrast and warmth, texture filtering, output resampling, per-pixel lighting, disable fog, custom texture packs and, per game, **graphics mods** (see [Graphics mods](#graphics-mods)) |
 | **Graphics** | Shader compilation (asynchronous ubershaders by default), build shaders before starting, threaded GPU recording (beta), texture cache accuracy, crop overscan, skip duplicate frames, quick resume (beta), fast save states |
 | **Audio** | Game volume and mute; **menu music** and **menu sounds**, each with its own switch and volume, and the **sound set** (Crisp, Soft or Porpoise's original); the **sound preset**, **audio buffer** and **fill audio gaps** (see [Sound](#sound)); and, in beta, **accurate audio**, the **Wii Remote speaker** (TV or controller) and the **microphone** |
@@ -435,6 +431,16 @@ own console.
 - **A game shows as GameCube but is a Wii game** (or the other way round)?
   Open its settings: **Controls → Console** sets it to GameCube or Wii.
 
+### Triforce arcade games (beta)
+The Triforce is the GameCube-based arcade board from Sega, Namco and Nintendo.
+Put the arcade games you dumped yourself in any games folder (`.gcm`, `.iso`,
+`.bin` or `.rvz`); they show in the library marked *Triforce* and start like any
+game. On the controller: **touch pad** inserts a coin, **L1** opens the test
+menu, **L3 + R3** is the service button. The test menu needs the board's own
+firmware, `segaboot.gcm`, from your own board, in `/data/porpoise/bios/`
+(Settings → About shows whether it's there). Arcade support comes from Dolphin
+and is still young: some games don't run yet.
+
 ### Your own BIOS and Wii Menu (beta)
 - **GameCube boot animation:** copy the BIOS (`IPL.bin`) you dumped from your
   own GameCube to `/data/porpoise/bios/`, under any name (Porpoise reads which
@@ -594,7 +600,8 @@ becomes the next player, up to four, and can join in the middle of a game.
 | `/data/porpoise/saves/User/Wii/backups/` | Wii saves you backed up from Memory Cards |
 | `/data/porpoise/latest-release.json` | What GitHub last said about the newest release |
 | `/data/porpoise/lang/` | Your own translation fixes (optional) |
-| `/data/porpoise/bios/` | Your own GameCube BIOS, under any name (optional) |
+| `/data/porpoise/bios/` | Your own GameCube BIOS, under any name, and the Triforce's `segaboot.gcm` (optional) |
+| `/data/porpoise/saves/User/Triforce/` | The arcade board's settings and each arcade game's backup data |
 | `/data/porpoise/screenshots/` | Your screenshots, a folder for each game |
 | `/data/porpoise/cheats/` | Your own cheat codes, one `<game ID>.ini` per game (optional) |
 | `/data/porpoise/retroachievements.ini` | Your RetroAchievements sign-in token (not your password) |
@@ -730,7 +737,8 @@ It stands on the work of many people. The full list, with licenses, is in
   **[VT323](https://github.com/google/fonts/tree/main/ofl/vt323)**,
   **[Doto](https://github.com/oliverlalan/Doto)**,
   **[Exo 2](https://github.com/googlefonts/Exo-2.0)**,
-  **[Lora](https://github.com/cyrealtype/Lora-Cyrillic)** (as Porpoise Serif) and
+  **[Lora](https://github.com/cyrealtype/Lora-Cyrillic)** (as Porpoise Serif),
+  **[Manrope](https://github.com/googlefonts/manrope)** and
   **[M PLUS 1](https://github.com/coz-m/MPLUS_FONTS)** (SIL OFL), and **[stb](https://github.com/nothings/stb)** by Sean Barrett.
 - **Warped Polygon**, for the GameCube widescreen code collection Porpoise's
   widescreen uses.

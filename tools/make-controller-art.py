@@ -5,6 +5,9 @@
 #   assets/ui/buttons.png           every button icon, in an 8x4 atlas of
 #                                   96-pixel cells, in the order of ICONS below
 #                                   (= porpoise::ui::Icon in src/ui_gfx.hpp)
+#   assets/ui/buttons-solid.png     the same, from the pack's "Full Solid"
+#                                   icons (white discs, the symbol cut out):
+#                                   the Porpoise look's
 #   assets/ui/dualsense.png         the controller on the button-mapping screen
 #   assets/ui/controller-lines.png  the controller with lines out to its buttons,
 #                                   for the in-game Controls tab
@@ -99,6 +102,12 @@ def atlas():
             icon = render(f.read(), CELL)
         sheet.alpha_composite(icon, ((i % COLS) * CELL, (i // COLS) * CELL))
     sheet.save(os.path.join(OUT, "buttons.png"), optimize=True)
+    solid = Image.new("RGBA", (CELL * COLS, CELL * ROWS), (0, 0, 0, 0))
+    for i, (_, name) in enumerate(ICONS):
+        with open(os.path.join(SRC, "full-solid", name + ".svg"), "rb") as f:
+            icon = render(f.read(), CELL)
+        solid.alpha_composite(icon, ((i % COLS) * CELL, (i // COLS) * CELL))
+    solid.save(os.path.join(OUT, "buttons-solid.png"), optimize=True)
 
 
 def dualsense():

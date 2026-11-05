@@ -501,9 +501,9 @@ void App::draw_hub()
     HubPanel &p = hub_;
     Gfx &g = *g_;
     const bool still = settings_ && settings_->reduced_motion;
-    p.anim = still ? 1.0f : std::min(1.0f, p.anim + 1.0f / 10.0f);
+    p.anim = still ? 1.0f : std::min(1.0f, p.anim + float(ui_dt_) * 6.0f); /* (open in 1/6 s, at 60 or 120 Hz) */
     const float t = ease_out(p.anim);
-    p.slide = still ? float(p.mode) : smooth(p.slide, float(p.mode), 1.0 / 60.0, 14.0f);
+    p.slide = still ? float(p.mode) : smooth(p.slide, float(p.mode), ui_dt_, 14.0f);
     const Color hint = rgba(0x8A96C8), good = rgba(0x7CF0A6);
     g.set_layer();
     g.panel(0, 0, 1920, 1080, rgba(0x02040C, 0.66f * t), 1, 0);

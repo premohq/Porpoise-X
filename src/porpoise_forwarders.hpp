@@ -22,6 +22,7 @@ struct Options
     std::string cover_path; /* its cover, "" when it has none */
     porpoise::tileart::Spec art; /* the icon and background (the tile art editor's) */
     bool exit_after_game = true;
+    bool vrr = false; /* Settings > Video > Refresh Rate: VRR (the tile's own declaration) */
 };
 struct Result
 {

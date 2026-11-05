@@ -68,9 +68,15 @@ std::vector<App::HomeItem> App::home_items() const
  * it shows (and lets go of it otherwise, unless the Wii Remote setup has it). */
 void App::home_pad_sync()
 {
-    const bool want = pointer_screen() && settings_->ui_pointer;
-    const bool has = porpoise::pad::wii().menu;
-    if (want && !has)
+    /* The Move read in the menus too, when it's the player's Wii Remote: its
+     * buttons, and its pointer in the Porpoise look's library (Oct 25: holding
+     * Start did nothing there, the Move being read only in a game or the hub). */
+    const bool move_here = settings_->wii_move && glass() && tab_ == Tab::Library &&
+                           (screen_ == Screen::Main || screen_ == Screen::Details);
+    const bool want = (pointer_screen() && settings_->ui_pointer) || move_here;
+    const porpoise::pad::WiiConfig now = porpoise::pad::wii();
+    const bool has = now.menu;
+    if (want && (!has || now.move != settings_->wii_move))
     {
         porpoise::pad::WiiConfig c = settings_->wii_config(false);
         c.active = false;
@@ -78,6 +84,7 @@ void App::home_pad_sync()
         c.pointer = porpoise::pad::PointerGyro;
         c.motion = c.shake = false;
         c.menu = true;
+        c.move = settings_->wii_move;
         porpoise::pad::set_wii(c);
     }
     else if (!want && has && screen_ != Screen::WiiSetup)
@@ -446,6 +453,8 @@ void App::draw_home(double time)
     /* The time in segments, in the dip; the date under the line. */
     draw_seg_clock(960, 852, 60);
     g.text_mid(Font::Bold, ts(42), 960, 972, rev::kDigits, Align::Center, short_date());
+    /* What's connected now, by the Settings button: just the controllers, no numbers. */
+    draw_ctl_badges(1660, kBtnY, 2);
 
     /* Round buttons: Porpoise (Settings) and the memory cards. */
     for (int b = 0; b < 2; ++b)
@@ -496,7 +505,7 @@ void App::draw_home(double time)
         hint(Glyph::Square, tr("Play Now"), hx, false);
         float rx = 1658;
         rx -= hint(Glyph::TouchPad, settings_->ui_pointer ? tr("Pointer Off") : tr("Pointer On"), rx, true) + 24;
-        hint(Glyph::Triangle, tr("Sort & Filter"), rx, true);
+        hint(Glyph::Triangle, tr("Menu"), rx, true);
         const std::string note = library_note();
         if (!note.empty())
         {

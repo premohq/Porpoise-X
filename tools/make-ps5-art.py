@@ -2,7 +2,7 @@
 # Porpoise - the PS5 home screen's art for the title, from Ruben's pictures in
 # tools/ps5-art: icon0.png (512x512 PNG) from icon.jpg, and pic0.dds / pic1.dds
 # (the backdrop behind the selected title: 3840x2160 BC7, as
-# tools/validate-assets.sh requires) from backdrop.jpg.
+# tools/validate-assets.sh requires) from backdrop.png (or backdrop.jpg).
 #   python3 tools/make-ps5-art.py        (needs Pillow and etcpak)
 # With BC7ENC=path/to/bc7enc (github.com/richgel999/bc7enc_rdo), the backdrop
 # is packed with its reduced-entropy, rate-distortion mode instead (-u4 -e
@@ -55,7 +55,12 @@ def dds_bc7(rgba, w, h):
 def main():
     icon = fit(Image.open(os.path.join(ART, "icon.jpg")).convert("RGB"), 512, 512)
     icon.save(os.path.join(SYS, "icon0.png"), optimize=True)
-    back = fit(Image.open(os.path.join(ART, "backdrop.jpg")).convert("RGBA"), 3840, 2160)
+    # backdrop.png (Oct 24: the Sonar boot's frame, from the boot concepts) over
+    # the older backdrop.jpg
+    back_src = os.path.join(ART, "backdrop.png")
+    if not os.path.exists(back_src):
+        back_src = os.path.join(ART, "backdrop.jpg")
+    back = fit(Image.open(back_src).convert("RGBA"), 3840, 2160)
     data = dds_bc7(back.tobytes(), 3840, 2160)
     for name in ("pic0.dds", "pic1.dds"):
         with open(os.path.join(SYS, name), "wb") as f:

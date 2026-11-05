@@ -6,6 +6,7 @@
  * Settings and the folder browser are in ui_app_settings.cpp; the look they
  * share is in ui_app_common.hpp. */
 #include "porpoise_states.hpp"
+#include "porpoise_debuglog.hpp"
 #include "ui_widescreen.hpp"
 #include "ui_app.hpp"
 
@@ -21,6 +22,7 @@
 #include <unistd.h>
 
 #include "porpoise_pad.hpp"
+#include "porpoise_move.hpp"
 #include "ui_app_common.hpp"
 #include "ui_i18n.hpp"
 
@@ -57,6 +59,7 @@ void App::forget_textures()
     sysmenu_game_.cover_tried = sysmenu_game_.disc_tried = sysmenu_game_.back_tried = sysmenu_game_.spine_tried = false;
     for (Game &g : lib_->games())
     {
+        g.cover_old = g.disc_old = g.back_old = g.spine_old = nullptr;
         g.cover = nullptr;
         g.cover_tried = false;
         g.disc = nullptr;
@@ -79,6 +82,14 @@ void App::forget_textures()
     forget_banners();
     logo_ = nullptr;
     logo_tried_ = false;
+    wordmark_ = wordmark_mark_ = nullptr;
+    eye_tex_ = nullptr;
+    eye_seq_ = 0;
+    wordmark_tried_ = false;
+    gl_wii_ = gl_gc_ = nullptr;
+    gl_icons_tried_ = false;
+    gl_ctl_ = gl_dolphin_ = nullptr;
+    gl_ctl_tried_ = false;
     pad_art_ = nullptr;
     pad_art_tried_ = false;
     lines_art_ = nullptr;
@@ -91,6 +102,17 @@ void App::forget_textures()
     flags_tried_ = false;
     for (Texture *&t : menu_slot_tex_)
         t = nullptr;
+    /* (Oct 24: the Controller Hub's diagrams were kept from the menus' device
+     * and drawn over a game on Dolphin's: the hub crashed there.) */
+    for (Texture *&t : dia_tex_)
+        t = nullptr;
+    isl_sc_tex_ = nullptr;
+    isl_sc_tried_ = false;
+    dia_tried_ = false;
+    boot_glow_ = boot_big_ = nullptr;
+    for (Texture *&t : boot_trace_)
+        t = nullptr;
+    forget_boot_textures();
 }
 
 void App::free_card_textures()
@@ -108,9 +130,10 @@ void App::free_card_textures()
 }
 
 /* A game's picture, decoded off the render thread: nullptr while it decodes
- * (picture_loading() says so) or when there is none. */
-Texture *App::picture(Texture *&tex, bool &tried, std::string &wait, std::string (Library::*where)(const Game &) const,
-                      const Game &g)
+ * (picture_loading() says so) or when there is none. One being replaced
+ * (old) is drawn until its new one is ready. */
+Texture *App::picture(Texture *&tex, Texture *&old, bool &tried, std::string &wait,
+                      std::string (Library::*where)(const Game &) const, const Game &g)
 {
     if (tex)
         return tex;
@@ -119,21 +142,27 @@ Texture *App::picture(Texture *&tex, bool &tried, std::string &wait, std::string
         tried = true;
         wait = (lib_->*where)(g);
     }
-    if (wait.empty())
-        return nullptr;
     bool pending = false;
-    tex = g_->texture_file_async(wait, &pending);
-    if (!pending)
-        wait.clear();
-    return tex;
+    if (!wait.empty())
+    {
+        tex = g_->texture_file_async(wait, &pending);
+        if (!pending)
+            wait.clear();
+    }
+    if (old && (tex || !pending))
+    {
+        g_->free_texture(old); /* its new one is here (or there is none) */
+        old = nullptr;
+    }
+    return tex ? tex : old;
 }
 
 Texture *App::cover_of(Game &g)
 {
-    const bool had = g.cover != nullptr;
-    Texture *t = picture(g.cover, g.cover_tried, g.cover_wait, &Library::cover_path, g);
+    const bool had = g.cover != nullptr || g.cover_old != nullptr;
+    Texture *t = picture(g.cover, g.cover_old, g.cover_tried, g.cover_wait, &Library::cover_path, g);
     if (t && !had)
-        g.cover_at = time_; /* it fades in */
+        g.cover_at = time_; /* it fades in (not one taking an old one's place) */
     return t;
 }
 
@@ -155,17 +184,17 @@ void App::launch_cover_now()
 
 Texture *App::disc_of(Game &g)
 {
-    return picture(g.disc, g.disc_tried, g.disc_wait, &Library::disc_path, g);
+    return picture(g.disc, g.disc_old, g.disc_tried, g.disc_wait, &Library::disc_path, g);
 }
 
 Texture *App::back_of(Game &g)
 {
-    return picture(g.back, g.back_tried, g.back_wait, &Library::back_path, g);
+    return picture(g.back, g.back_old, g.back_tried, g.back_wait, &Library::back_path, g);
 }
 
 Texture *App::spine_of(Game &g)
 {
-    return picture(g.spine, g.spine_tried, g.spine_wait, &Library::spine_path, g);
+    return picture(g.spine, g.spine_old, g.spine_tried, g.spine_wait, &Library::spine_path, g);
 }
 
 Texture *App::save_icon(Save &s)
@@ -366,6 +395,7 @@ bool App::nav(std::uint32_t bit, float &timer, double dt)
 App::Action App::update(const Input &in, double dt)
 {
     time_ += dt;
+    ui_dt_ = dt > 0 && dt < 0.1 ? dt : 1.0 / 60.0;
     prev_ = held_;
     held_ = in.held;
     raw_prev_ = raw_held_;
@@ -390,12 +420,89 @@ App::Action App::update(const Input &in, double dt)
         l1_armed_ = false;
     }
 
-    const bool left = nav(BtnLeft, rep_left_, dt), right = nav(BtnRight, rep_right_, dt);
+    /* The Move's pointer, in the Porpoise look's library and a game's page
+     * (its Start held a second turns it on and off there). */
+    {
+        const bool place = glass() && tab_ == Tab::Library &&
+                           (screen_ == Screen::Main || screen_ == Screen::Details) && !gl_menu_ && !isl_open_ &&
+                           !dialog_.open && lib_ && lib_->shown() > 0;
+        mp_frame(held_, place && mp_on_, false, 150.0f);
+        if (mp_hold_ && place)
+        {
+            mp_on_ = !mp_on_;
+            sfx(Sound::MovingTab);
+            /* Turned on pointing at the screen: that's its middle. The island
+             * says so, as it does a controller coming and going. */
+            if (mp_on_)
+                porpoise::pad::centre_now(0);
+            ctl_toast(mp_on_ ? 0 : 3, mp_on_ ? tr("Move pointer on") : tr("Move pointer off"),
+                      mp_on_ ? tr("Point, and pull T \xC2\xB7 hold Start to turn it off")
+                             : tr("Hold Start to turn it back on"));
+        }
+    }
+    bool left = nav(BtnLeft, rep_left_, dt), right = nav(BtnRight, rep_right_, dt);
     const bool up = nav(BtnUp, rep_up_, dt), down = nav(BtnDown, rep_down_, dt);
     auto &games = lib_->games();
+    if (mp_live_ && lib_->shown() > 0)
+    {
+        const int shown = lib_->shown();
+        if (screen_ == Screen::Main)
+        {
+            /* T held and swept: the row follows the hand. */
+            const int step = mp_take_step();
+            if (step > 0)
+                left = true;
+            else if (step < 0)
+                right = true;
+            if (mp_click_ >= kMpGame && mp_click_ < kMpGame + shown)
+            {
+                const int i = mp_click_ - kMpGame;
+                if (i == selected_)
+                    held_ |= BtnSquare; /* the one in front: its page (Square, as the prompt has it) */
+                else
+                {
+                    swipe_from_ = selected_;
+                    swipe_dir_ = i > selected_ ? 1 : -1;
+                    selected_ = i;
+                    lib_->set_selected(Library::key_of(games[std::size_t(i)]));
+                    sfx(Sound::GameRow);
+                }
+            }
+        }
+        else if (screen_ == Screen::Details)
+        {
+            mp_steps_ = 0;
+            const int count = details_shots_ > 0 ? 5 : 4;
+            if (mp_moved_to_ >= kMpDetails && mp_moved_to_ < kMpDetails + count &&
+                details_row_ != mp_moved_to_ - kMpDetails)
+            {
+                details_row_ = mp_moved_to_ - kMpDetails;
+                sfx(Sound::MenuScroll);
+            }
+            if (mp_click_ >= kMpDetails && mp_click_ < kMpDetails + count)
+            {
+                details_row_ = mp_click_ - kMpDetails;
+                held_ |= BtnCross;
+            }
+        }
+    }
     Action action = Action::None;
     home_pad_sync(); /* the Revolution look's pointer */
     poll_texture_packs(); /* Settings > Textures: the packs' counts, when counted */
+    ctl_watch();          /* controllers coming and going: notices */
+    porpoise::move::set_camera(settings_->ps3_eye); /* the PS3 Eye, looked for while it's on */
+    porpoise::move::set_ball_color(settings_->move_color); /* the light, and what the Eye looks for */
+    menu_haptics();
+    if (lib_->hide_duplicates() != settings_->hide_duplicates)
+    {
+        /* Settings > Games > Hide Duplicate Games, as it is now. */
+        auto &all = lib_->games();
+        const std::string key = lib_->shown() > 0 ? Library::key_of(all[std::size_t(std::clamp(selected_, 0, lib_->shown() - 1))]) : "";
+        lib_->set_hide_duplicates(settings_->hide_duplicates);
+        keep_selection(key);
+    }
+    island_tick(dt); /* the island's swipes and size (4.5: every theme has it) */
+    glass_tick(dt);  /* (the side menu's, in every theme too) */
     if (update_nand_job())
         return Action::None; /* a Wii's system data being imported: the menus wait */
     {
@@ -419,11 +526,12 @@ App::Action App::update(const Input &in, double dt)
     screen_anim_ = calm ? 0.0f : std::max(0.0f, screen_anim_ - float(dt) * 4.5f);
     dialog_.anim = calm ? 1.0f : std::min(1.0f, dialog_.anim + float(dt) * 6.0f);
     flip_anim_ = calm ? 0.0f : std::max(0.0f, flip_anim_ - float(dt) * 2.4f);
+    gl_back_ = calm || screen_ != Screen::Main ? 0.0f : std::max(0.0f, gl_back_ - float(dt) * 2.6f);
     swipe_anim_ = calm ? 0.0f : std::max(0.0f, swipe_anim_ - float(dt) * 3.4f);
     zoom_anim_ = calm ? 0.0f : std::max(0.0f, zoom_anim_ - float(dt) * 1.9f);
     right_x_ = std::fabs(in.right_x) > 0.15f ? in.right_x : 0.0f;
     {
-        const float target = (box_back_ ? kPi : 0.0f) + right_x_ * 0.9f;
+        const float target = (box_back_ ? kPi : 0.0f) + (glass() ? gl_turn_ : right_x_ * 0.9f);
         box_yaw_ = calm ? target : smooth(box_yaw_, target, dt, 7.0f);
     }
     if (pill_x_ >= 0 && tab_w_[0] > 0)
@@ -482,7 +590,7 @@ App::Action App::update(const Input &in, double dt)
     if (screen_ == Screen::Achievements)
         return update_achievements_screen(up, down);
     if (screen_ == Screen::Welcome)
-        return update_welcome(left, right, dt);
+        return update_welcome(up, down, left, right, dt);
     if (screen_ == Screen::Browse)
         return update_browser(up, down);
     if (screen_ == Screen::TileArt)
@@ -515,7 +623,7 @@ App::Action App::update(const Input &in, double dt)
             if (sort_row_ == 0)
                 lib_->sort(Library::Sort((int(lib_->sort_order()) + 4 + step) % 4));
             else
-                lib_->set_show(Library::Show((int(lib_->show()) + 4 + step) % 4));
+                lib_->set_show(Library::Show((int(lib_->show()) + 5 + step) % 5));
             keep_selection(key);
             lib_->save();
             sfx(Sound::MenuScroll);
@@ -533,7 +641,7 @@ App::Action App::update(const Input &in, double dt)
             if (sort_row_ == 0)
                 lib_->sort(Library::Sort((int(lib_->sort_order()) + 1) % 4));
             else
-                lib_->set_show(Library::Show((int(lib_->show()) + 1) % 4));
+                lib_->set_show(Library::Show((int(lib_->show()) + 1) % 5));
             keep_selection(key);
             lib_->save();
             sfx(Sound::MenuScroll);
@@ -549,9 +657,10 @@ App::Action App::update(const Input &in, double dt)
         open_account();
         return Action::None;
     }
-    if (screen_ == Screen::Details && pressed(BtnSquare) && lib_->shown() > 0)
+    if (screen_ == Screen::Details && pressed(BtnSquare) && lib_->shown() > 0 && !glass())
     {
-        /* Square on Details: the game's achievements, as last kept. */
+        /* Square on Details: the game's achievements, as last kept (the
+         * Porpoise look shows them in the details instead). */
         const Game &game = games[std::size_t(std::clamp(selected_, 0, lib_->shown() - 1))];
         if (details_achievements(game).valid())
         {
@@ -559,10 +668,25 @@ App::Action App::update(const Input &in, double dt)
             return Action::None;
         }
     }
+    if (!glass())
+    {
+        /* 4.5: the side menu, in every theme. */
+        bool handled = false;
+        const Action a = update_side_menu(left, right, up, down, handled);
+        if (handled)
+            return a;
+    }
     if (starcube())
     {
         bool handled = false;
         const Action a = update_starcube(left, right, up, down, handled);
+        if (handled)
+            return a;
+    }
+    if (glass())
+    {
+        bool handled = false;
+        const Action a = update_glass(left, right, up, down, dt, handled);
         if (handled)
             return a;
     }
@@ -613,12 +737,13 @@ App::Action App::update(const Input &in, double dt)
                 sfx(Sound::GameRow);
             }
         }
-        if (up && details_row_ > 0)
+        /* The Porpoise look's buttons are in a row: left and right. */
+        if ((glass() ? left : up) && details_row_ > 0)
         {
             --details_row_;
             sfx(Sound::MenuScroll);
         }
-        if (down && details_row_ < (details_shots_ > 0 ? 4 : 3))
+        if ((glass() ? right : down) && details_row_ < (details_shots_ > 0 ? 4 : 3))
         {
             ++details_row_;
             sfx(Sound::MenuScroll);
@@ -626,6 +751,14 @@ App::Action App::update(const Input &in, double dt)
         if (pressed(BtnCircle))
         {
             open_screen(Screen::Main);
+            if (!calm && tab_ == Tab::Library)
+            {
+                /* The case flies back into its place in the row, the page fading
+                 * as it goes (every theme: Revolution's tile zooms back out). */
+                gl_back_ = 1.0f;
+                screen_anim_ = 0;
+                box_back_ = false;
+            }
             sfx(Sound::DetailsFlip);
         }
         if (pressed(BtnTriangle))
@@ -635,8 +768,10 @@ App::Action App::update(const Input &in, double dt)
         }
         if (pressed(BtnOptions) && !games.empty())
         {
-            lib_->toggle_favourite(games[std::size_t(selected_)]);
-            sfx(games[std::size_t(selected_)].favourite ? Sound::LaunchGame : Sound::MovingTab);
+            /* Options - start - plays it, straight in. */
+            action = start_game(&games[selected_], "", false, true);
+            sfx(Sound::LaunchGame);
+            return action;
         }
         if (pressed(BtnCross) && !games.empty())
         {
@@ -665,9 +800,9 @@ App::Action App::update(const Input &in, double dt)
         return action;
     }
 
-    if (l1_tap_)
+    if (l1_tap_ && !glass()) /* the Porpoise look: the filters (update_glass) */
         set_tab((int(tab_) + 2) % 3, -1);
-    if (pressed(BtnR1))
+    if (pressed(BtnR1) && !glass())
         set_tab((int(tab_) + 1) % 3, +1);
 
     if (tab_ == Tab::Library && (!games.empty() || revolution()))
@@ -738,8 +873,10 @@ App::Action App::update(const Input &in, double dt)
         }
         if (fav && shown > 0)
         {
-            lib_->toggle_favourite(games[std::size_t(selected_)]);
-            sfx(games[std::size_t(selected_)].favourite ? Sound::LaunchGame : Sound::MovingTab);
+            /* Options - the controller's start - starts it, straight in (past
+             * the Wii controller setup). Favorites: the side menu's. */
+            action = start_game(&games[selected_], "", false, true);
+            sfx(Sound::LaunchGame);
         }
         if (details && shown > 0)
         {
@@ -760,7 +897,7 @@ App::Action App::update(const Input &in, double dt)
                 start_zoom(+1);
             }
         }
-        if (pressed(BtnTriangle))
+        if (pressed(BtnTriangle) && !glass()) /* the Porpoise look: its menu */
         {
             sfx(Sound::MenuScroll);
             screen_ = Screen::Sort;
@@ -872,6 +1009,13 @@ void App::set_tab(int tab, int dir)
 
 void App::open_screen(Screen s)
 {
+    static const char *const names[] = {"Main",     "Details", "Sort",         "Browse",  "Game Settings",
+                                        "Mapping",  "States",  "Wii Guide",    "Controller Hub", "Welcome",
+                                        "Achievements", "Tile Art", "Shots"};
+    const int i = int(s);
+    if (s != screen_)
+        porpoise::debuglog::app("screen: %s (look %d, mode %d)", i >= 0 && i < 13 ? names[i] : "?",
+                                settings_ ? settings_->ui_theme : -1, settings_ ? settings_->ui_mode : -1);
     screen_ = s;
     screen_anim_ = 1.0f;
 }
@@ -1300,7 +1444,22 @@ void App::draw_dialog()
     face.rim_w = 2.4f;
     face.glow = 14;
     face.phase = 0.4f;
-    glass_block(g, 960, y + h * 0.5f, w, h, 18, 0, 0, 42, face);
+    if (glass())
+    {
+        /* The Porpoise look: its own frosted card, solid enough to read on
+         * (Oct 24: its glass face drew nothing here, the words floated). */
+        const bool ink = g.toned();
+        in_true_color([&] {
+            g.panel(x - 6, y - 6, w + 12, h + 12, rgba(0x000000, 0.28f * t), 1, 44); /* its shadow */
+            g.panel(x, y, w, h, ink ? rgba(0xF6F8FB, 0.96f * t) : rgba(0x11151D, 0.94f * t), 1, 38,
+                    dialog_.danger ? with_alpha(kDanger, 0.8f * t)
+                                   : (ink ? rgba(0xC9D0DA, t) : rgba(0xFFFFFF, 0.16f * t)),
+                    1.4f);
+        });
+        glass_pill(x, y, w, h, 38, 0.6f * t);
+    }
+    else
+        glass_block(g, 960, y + h * 0.5f, w, h, 18, 0, 0, 42, face);
     g.text_mid(Font::Bold, ts(38), x + 56, y + 64, kWhite, Align::Left, fit(g, Font::Bold, ts(38), dialog_.title, w - 112));
     float ly = y + 118;
     if (pic_h > 0)
@@ -1488,40 +1647,61 @@ std::string App::clock_text() const
     return buf;
 }
 
-/* The Porpoise mark and name, centred on cy. Ruben's textured logo
- * (assets/brand/logo.png) replaces the tinted silhouette when it is there. */
-void App::draw_brand(float cy)
+/* Ruben's wordmark (assets/brand/wordmark*.png, tools/make-wordmark.py) at x,
+ * centred on cy, h tall. style: 0 the dolphin in cyan and the name in white
+ * (dark backdrops), 1 all white (OLED), 2 all black (light backdrops).
+ * Returns its width. */
+float App::draw_wordmark(float x, float cy, float h, float alpha, int style)
 {
     Gfx &g = *g_;
-    if (!logo_tried_)
+    if (!wordmark_tried_)
     {
-        logo_tried_ = true;
-        const std::string path = g.asset_dir() + "/brand/logo.png";
-        if (access(path.c_str(), R_OK) == 0)
-            logo_ = g.texture_file(path);
+        wordmark_tried_ = true;
+        wordmark_ = g.texture_file(g.asset_dir() + "/brand/wordmark.png");
+        wordmark_mark_ = g.texture_file(g.asset_dir() + "/brand/wordmark-mark.png");
     }
-    float x = 48;
-    if (logo_ && logo_->height > 0)
-    {
-        const float h = 72, w = std::min(160.0f, h * float(logo_->width) / float(logo_->height));
-        g.image(logo_, x, cy - h * 0.5f, w, h, kWhite);
-        x += w + 16;
-    }
-    else
-    {
-        if (g.brand_mask())
-            g.image(g.brand_mask(), x, cy - 32, 64, 64, kCyan);
-        x += 82;
-    }
-    const float word = g.text_mid(Font::SemiBold, 30, x, cy, rgba(0xBFE9FF), Align::Left, "PORPOISE", 7.0f);
-    if (kChannel != Channel::Release)
-    {
-        /* A test build: its tag after the wordmark. */
-        const std::string tag = kChannel == Channel::Alpha ? "ALPHA" : "BETA";
-        const float tx = x + word + 10, tw = g.measure(Font::Bold, 20, tag, 2.0f) + 22;
-        g.panel(tx, cy - 16, tw, 32, rgba(0xFFB547, 0.95f), 1, 16);
-        g.text_mid(Font::Bold, 20, tx + tw * 0.5f, cy, rgba(0x2A1A00), Align::Center, tag, 2.0f);
-    }
+    if (!wordmark_ || wordmark_->height <= 0)
+        return 0;
+    const float w = h * float(wordmark_->width) / float(wordmark_->height);
+    /* (for the boot to land on, and hidden until it has) */
+    brand_box_[0] = x;
+    brand_box_[1] = cy;
+    brand_box_[2] = h;
+    brand_style_ = style;
+    brand_seen_ = true;
+    alpha *= brand_alpha();
+    if (alpha <= 0.003f)
+        return w;
+    in_true_color([&] {
+        g.image(wordmark_, x, cy - h * 0.5f, w, h, style == 2 ? rgba(0x15181F, alpha) : rgba(0xFFFFFF, alpha));
+        if (style == 0 && wordmark_mark_)
+            g.image(wordmark_mark_, x, cy - h * 0.5f, w, h, rgba(0x35D2FF, alpha));
+        if (kChannel != Channel::Release)
+        {
+            /* A test build's tag right of the name, in the logo's own ink: the
+             * dolphin's cyan by the colour logo, white by the all-white one,
+             * black by the all-black one. */
+            const Color ink = style == 2 ? rgba(0x15181F, alpha) : style == 1 ? rgba(0xFFFFFF, alpha)
+                                                                               : rgba(0x35D2FF, alpha);
+            const std::string tag = kChannel == Channel::Alpha ? "ALPHA" : "BETA";
+            const float size = h * 0.24f, ph = h * 0.36f, pad = h * 0.13f;
+            const float pw = g.measure(Font::Bold, size, tag, size * 0.08f) + pad * 2;
+            const float px = x + w + h * 0.16f, py = cy + h * 0.04f - ph * 0.5f;
+            const bool was_solid = g.solid();
+            g.set_solid(true);
+            g.panel(px, py, pw, ph, rgba(0x000000, 0.0f), 1.0f, ph * 0.5f, ink, std::max(1.5f, h * 0.026f));
+            g.set_solid(was_solid);
+            g.text_mid(Font::Bold, size, px + pw * 0.5f, py + ph * 0.5f, ink, Align::Center, tag, size * 0.08f);
+        }
+    });
+    return w;
+}
+
+/* The Porpoise wordmark at the top left: black on the light looks, the cyan
+ * dolphin and the white name on the dark ones. */
+void App::draw_brand(float cy)
+{
+    draw_wordmark(48, cy, 76, 1.0f, revolution() ? 2 : 0);
 }
 
 void App::draw_curtain(float amount)
@@ -1537,12 +1717,39 @@ void App::draw_curtain(float amount)
             logo_ = g.texture_file(path);
     }
     const float a = std::min(1.0f, amount);
+    /* Solid black, whatever the look: its dark fills are see-through (the
+     * Porpoise look's), and the game just left showed through the curtain,
+     * held there while it closed. */
+    const Look was = g.look();
+    {
+        Look plain = was;
+        plain.hue = -1;
+        plain.saturation = 1;
+        plain.dark = 1;
+        plain.fill_alpha = 1;
+        plain.mono = false;
+        g.set_look(plain);
+    }
+    const bool solid = g.solid();
+    g.set_solid(true);
     g.panel(-20, -20, 1960, 1120, rgba(0x02040C, a), 1.0f, 0);
+    g.set_solid(solid);
     /* As it lifts, the dolphin swells a little and goes first, with its glow
      * (the same as the boot's: no jump between them). */
     const float m = a * a;
-    g.blob(960, 540, 900, 900, rgba(0x2F6BFF, 0.16f * m));
+    /* Its glow breathes, slowly, while it waits: still there, not stuck. */
+    const float breath = settings_ && settings_->reduced_motion ? 0.0f : 0.5f + 0.5f * std::sin(g.frame_time() * 2.2f);
+    g.blob(960, 540, 900, 900, rgba(0x2F6BFF, (0.12f + 0.08f * breath) * m));
     draw_mark(960, 540, 220 * (1.0f + 0.18f * (1.0f - a)), with_alpha(kWhite, m));
+    if (!curtain_note_.empty() && a > 0.6f)
+    {
+        const float na = (a - 0.6f) / 0.4f;
+        const bool toned = g.toned();
+        g.set_tone(false);
+        g.text_mid(Font::SemiBold, ts(24), 960, 720, rgba(0xC9D6EE, 0.85f * na), Align::Center, curtain_note_);
+        g.set_tone(toned);
+    }
+    g.set_look(was);
 }
 
 bool App::draw_mark(float cx, float cy, float width, Color tint)
@@ -1613,7 +1820,8 @@ void App::draw_top_bar()
     keycap(bar_x - 66, Glyph::L1, "L1");
     keycap(bar_x + bar_w + 66, Glyph::R1, "R1");
 
-    g.text_mid(Font::SemiBold, ts(27), 1866, kBarCy, kWhite, Align::Right, clock_text());
+    /* What's connected and the time: the island (ui_app_glass.cpp), drawn
+     * over the page by draw(). */
 }
 
 /* Two keycaps side by side (L2 R2, L1 R1) where a prompt's glyph would be;
@@ -1655,6 +1863,19 @@ void App::draw_prompts(const std::vector<std::pair<Glyph, std::string>> &left_in
          screen_ == Screen::Achievements) &&
         !drawing_dialog_)
         return; /* the dialog (or the account panel, the achievements page) brings its own */
+    if (glass())
+    {
+        /* The Porpoise look: its own, small, bottom left (the other screens' and
+         * the dialogs' too). */
+        if ((dialog_.open || acct_.open || share_.open || dns_.open || hub_.open || sys_.open || code_.open ||
+             screen_ == Screen::Achievements) &&
+            !drawing_dialog_)
+            return;
+        std::vector<std::pair<Glyph, std::string>> all = left_in;
+        all.insert(all.end(), right_in.begin(), right_in.end());
+        draw_glass_prompts(all, 1.0f, drawing_dialog_);
+        return;
+    }
     /* Every prompt is translated here, so callers write plain English. */
     std::vector<std::pair<Glyph, std::string>> left_tr, right_tr;
     for (const auto &p : left_in)
@@ -1934,7 +2155,7 @@ void App::draw_library(double time)
     }
 
     /* The games, in the view chosen in Settings > Interface. */
-    const int view = std::clamp(settings_->lib_view, 0, 9);
+    const int view = lib_view_now();
     switch (view)
     {
     case 8: draw_spines(time); break;
@@ -1969,7 +2190,7 @@ void App::draw_library(double time)
                                                          : tr("No GameCube games here"));
         g.text(Font::Regular, ts(28), 960, 580, kSoft, Align::Center,
                tr("Sort & Filter (Triangle) can show all of your games."));
-        draw_prompts({}, {{Glyph::Triangle, "Sort & Filter"}}, "");
+        draw_prompts({}, {{Glyph::Triangle, "Menu"}}, "");
         return;
     }
 
@@ -2001,8 +2222,7 @@ void App::draw_library(double time)
     draw_prompts({{Glyph::DPad, "Browse"},
                   {kKeyL2R2, lib_->sort_order() == Library::Sort::Title ? "Letters" : "Pages"},
                   {Glyph::Cross, "Play"}},
-                 {{Glyph::Options, sel.favourite ? "Unfavorite" : "Favorite"}, {Glyph::Square, "Details"},
-                  {Glyph::Triangle, "Sort & Filter"}},
+                 {{Glyph::Square, "Details"}, {Glyph::Triangle, "Menu"}},
                  pos);
 }
 
@@ -2025,12 +2245,7 @@ std::vector<int> App::recent_games()
 
 bool App::dock_shown()
 {
-    if (!settings_ || settings_->recent_style == 0 || tab_ != Tab::Library || starcube() ||
-        (revolution() && settings_->ui_layout == 0) || lib_->shown() == 0)
-        return false;
-    for (const Game &g : lib_->games())
-        if (g.last_played > 0)
-            return true;
+    /* 4.1: no Recently Played along the library's bottom. */
     return false;
 }
 
@@ -2193,6 +2408,7 @@ std::string App::library_count() const
     case Library::Show::Wii: return plural((long long)shown, "1 Wii game", "{n} Wii games");
     case Library::Show::GameCube: return plural((long long)shown, "1 GameCube game", "{n} GameCube games");
     case Library::Show::Channels: return plural((long long)shown, "1 channel", "{n} channels");
+    case Library::Show::Favourites: return plural((long long)shown, "1 favorite", "{n} favorites");
     default: return plural((long long)shown, "1 game", "{n} games");
     }
 }
@@ -2212,7 +2428,7 @@ void App::draw_sort()
     g.panel(x, y, w, h, rgba(0x13256F, 0.92f), 0.65f, kR, rgba(0x6FAEFF), 2.0f, 10, 0.25f);
     g.text_mid(Font::Bold, ts(36), x + 40, y + 62, kWhite, Align::Left, tr("Sort & Filter"));
     const std::string orders[4] = {tr("Title A-Z"), tr("Recently Played"), tr("Most Played"), tr("Favorites First")};
-    const std::string shows[4] = {tr("All Games"), tr("GameCube"), tr("Wii"), tr("Channels")};
+    const std::string shows[5] = {tr("All Games"), tr("GameCube"), tr("Wii"), tr("Channels"), tr("Favorites")};
     const std::string names[3] = {tr("Sort By"), tr("Show"), tr("Get Covers and Info Now")};
     const std::string values[3] = {orders[int(lib_->sort_order())], shows[int(lib_->show())], ""};
     for (int i = 0; i < 3; ++i)
@@ -2292,8 +2508,10 @@ void App::draw_details(double time)
     float disc_bottom = 0; /* below it, text may take the panel's whole width */
     if (Texture *disc = disc_of(game))
     {
-        const float d = 176, dcx = px + pw - 52 - d * 0.5f, dcy = py + 36 + d * 0.5f;
-        disc_bottom = dcy + d * 0.5f + 14;
+        /* A GameCube disc is the smaller one, as it is in your hand. */
+        const float full = 176, d = game.platform == "Wii" ? full : full * 0.80f;
+        const float dcx = px + pw - 52 - full * 0.5f, dcy = py + 36 + full * 0.5f;
+        disc_bottom = dcy + full * 0.5f + 14;
         const float angle = settings_->reduced_motion ? 0.0f : float(time) * 0.6f;
         Corner c[4];
         const float ca = std::cos(angle), sa = std::sin(angle), r = d * 0.5f;
@@ -2305,7 +2523,7 @@ void App::draw_details(double time)
         Corner gc[4];
         rect_at(dcx, dcy, r, r, 0, 0, 0, gc);
         gloss_over(g, gc, d, d, r, 0.7f);
-        text_w = pw - 104 - d - 30;
+        text_w = pw - 104 - full - 30;
     }
 
     const std::string title = game.db_title.empty() ? game.title : game.db_title;
@@ -2483,7 +2701,7 @@ void App::draw_details(double time)
             g.glyph(Glyph::Arrow, rx - 26, ry + rh * 0.5f, 32, kWhite, kPi * 0.5f);
     }
     g.set_layer(layer_dx_, layer_dy_, layer_fade_);
-    if (screen_ != Screen::States) /* the save states bring their own */
+    if (screen_ != Screen::States && screen_ != Screen::Main) /* the save states bring their own; Main: the page closing */
     {
         std::vector<std::pair<Glyph, std::string>> right = {
             {kKeyL2R2, "Other Games"}, {Glyph::Triangle, box_back_ ? "Front of Box" : "Back of Box"}};
@@ -2717,7 +2935,11 @@ void App::release_covers()
             g_->free_texture(game.back);
         if (game.spine)
             g_->free_texture(game.spine);
+        for (Texture *old : {game.cover_old, game.disc_old, game.back_old, game.spine_old})
+            if (old)
+                g_->free_texture(old);
         game.cover = game.disc = game.back = game.spine = nullptr;
+        game.cover_old = game.disc_old = game.back_old = game.spine_old = nullptr;
         game.cover_tried = game.disc_tried = game.back_tried = game.spine_tried = false;
     }
 }
@@ -2729,6 +2951,9 @@ void App::apply_look()
     if (!settings_)
         return;
     g_->set_look(look_for(*settings_));
+    g_->set_solid_icons(glass());
+    /* At 1080p (a 4K TV scales it up), the Porpoise look's small words a touch heavier. */
+    g_->set_text_boost(glass() && g_->target_width() < 2000.0f ? 0.045f : glass() ? 0.02f : 0.0f);
     g_->set_theme_fonts(fonts_for(*settings_));
     kR = th().radius;
     theme_seen_ = settings_->ui_theme;
@@ -2823,15 +3048,20 @@ void App::cover_arrived(const std::string &id)
     for (Game &game : lib_->games())
         if (game.id == id)
         {
-            if (game.cover)
-                g_->free_texture(game.cover);
-            if (game.disc)
-                g_->free_texture(game.disc);
-            if (game.back)
-                g_->free_texture(game.back);
-            if (game.spine)
-                g_->free_texture(game.spine);
-            game.cover = game.disc = game.back = game.spine = nullptr;
+            /* Shown as they were until the new ones have decoded (a box cut
+             * again flashed empty, then faded in). */
+            auto swap = [&](Texture *&tex, Texture *&was) {
+                if (!tex)
+                    return;
+                if (was)
+                    g_->free_texture(was);
+                was = tex;
+                tex = nullptr;
+            };
+            swap(game.cover, game.cover_old);
+            swap(game.disc, game.disc_old);
+            swap(game.back, game.back_old);
+            swap(game.spine, game.spine_old);
             game.cover_tried = game.disc_tried = game.back_tried = game.spine_tried = false;
         }
 }
@@ -2842,6 +3072,7 @@ void App::draw(double time)
 {
     Gfx &g = *g_;
     apply_look();
+    set_skin();
     /* The game the player is on: where its cover is drawn is kept, for the
      * glide into the launch screen. */
     if (!launch_ && lib_ && selected_ >= 0 && selected_ < lib_->shown())
@@ -2863,9 +3094,15 @@ void App::draw(double time)
         draw_starcube(time);
         return;
     }
+    if (glass())
+    {
+        draw_glass(time);
+        draw_move_pointer();
+        return;
+    }
     g.background();
     if (tab_ == Tab::Library && (screen_ == Screen::Main || screen_ == Screen::Sort) && settings_ &&
-        settings_->lib_view == 9)
+        lib_view_now() == 9)
         draw_spotlight_backdrop();
     if (th().light)
         g.set_tone(true);
@@ -2917,7 +3154,24 @@ void App::draw(double time)
         switch (tab_)
         {
         case Tab::Library:
-            draw_library(time);
+            if (gl_back_ > 0.001f && screen_ == Screen::Main && lib_->shown() > 0)
+            {
+                /* Back from Details: the row fades in round the box as it flies
+                 * back to its place, the page fading away. */
+                const float u = 1.0f - gl_back_, k = u * u * (3.0f - 2.0f * u);
+                g.set_layer(dx, dy, fade * (0.2f + 0.8f * k));
+                draw_library(time);
+                const float flip = flip_anim_, lf = layer_fade_;
+                flip_anim_ = k;
+                layer_fade_ = fade * (1.0f - k) * (1.0f - k);
+                g.set_layer(dx, dy, layer_fade_);
+                draw_details(time);
+                flip_anim_ = flip;
+                layer_fade_ = lf;
+                g.set_layer(dx, dy, fade);
+            }
+            else
+                draw_library(time);
             if (screen_ == Screen::Sort)
                 draw_sort();
             break;
@@ -2929,7 +3183,14 @@ void App::draw(double time)
             break;
         }
     g.set_layer();
+    if (settings_->ui_theme == int(ThemeId::Porpoise))
+    {
+        g.set_tone(false);
+        draw_island(1);
+    }
+    draw_side_menu();
     draw_dialog();
+    draw_ctl_toasts();
     draw_update_overlay(time);
     g.set_intro(1, 0);
     draw_theme_overlay();
@@ -3011,9 +3272,18 @@ void App::draw_revolution(double time)
             break;
         }
     g.set_layer();
+    if (!full_page)
+    {
+        /* 4.5: the island, top right (its words in Revolution's ink). */
+        g.set_tone(true);
+        draw_island(2);
+    }
+    draw_side_menu();
+    g.set_tone(true);
     draw_dialog();
     draw_update_overlay(time);
     g.set_tone(false);
+    draw_ctl_toasts();
     draw_rev_pointer();
     g.set_intro(1, 0);
 }
@@ -3085,17 +3355,35 @@ float App::launch_intro(double time) const
 {
     if (settings_ && settings_->reduced_motion)
         return 1.0f;
-    return std::clamp(float((time - launch_start_) / 0.5), 0.0f, 1.0f);
+    return std::clamp(float((time - launch_start_) / launch_intro_length()), 0.0f, 1.0f);
 }
 
-void App::begin_launch(Game *game)
+double App::launch_intro_length() const
+{
+    /* The Porpoise look's is longer: the case flips over into the launch
+     * screen while the library parts round it. */
+    return glass() ? 0.8 : 0.5;
+}
+
+void App::begin_launch(Game *game, double clock)
 {
     /* Where its cover was in the last frame: it glides from there. */
     launch_from_ok_ = game && game->cover && g_->watched(launch_from_) && launch_from_[2] > 8 && launch_from_[3] > 8;
+    if (!launch_from_ok_ && game && game->cover && glass())
+    {
+        /* Not on screen just before (a Wii game, from its controller setup):
+         * the case still turns over into place, from a little way off. */
+        launch_from_[0] = 960 - 120;
+        launch_from_[1] = 380 - 168 + 60;
+        launch_from_[2] = 240;
+        launch_from_[3] = 336;
+        launch_from_ok_ = true;
+    }
     launch_ = game;
+    gl_launching_ = true;
     launch_status_ = "Loading Dolphin";
     launch_progress_ = -1;
-    launch_start_ = time_;
+    launch_start_ = clock >= 0 ? clock : time_;
     if (game && !game->boot_menu) /* a menu's chosen game was marked when it was chosen */
         lib_->mark_played(*game);
 }
@@ -3118,6 +3406,11 @@ void App::draw_launch(double time)
     const float bg = ease(std::min(1.0f, k * 1.6f));
     const float rise = ease(std::clamp((k - 0.15f) / 0.6f, 0.0f, 1.0f));
     const float words = std::clamp((k - 0.6f) / 0.4f, 0.0f, 1.0f);
+    if (glass())
+    {
+        draw_glass_launch(time, k, bg, rise, words);
+        return;
+    }
     if (revolution())
     {
         g.set_tone(false);

@@ -83,7 +83,15 @@ enum class Sound
     MovingTab,
     DetailsFlip,
     LaunchGame,
+    BootSonar,     /* the boot's hum and pings, in Soundscape's key (porpoise::sound) */
+    BootSonarLegacy, /* ...in the original music's */
 };
+
+class Gfx;
+/* The boot's sonar screen at rest (main's first frames, before the menus). */
+void draw_boot_backdrop(Gfx &g);
+/* The device is going: the boot's own pictures with it (ui_app_boot.cpp). */
+void forget_boot_textures();
 
 struct OnlineTest; /* the Online hub's server test (ui_app_online.cpp) */
 } // namespace porpoise::ui
@@ -141,6 +149,7 @@ public:
     void draw(double time);
 
     Game *launch_game() { return launch_; }
+    double launch_intro_length() const; /* seconds: the library fading under the launch screen */
     void launch_cover_now(); /* the launching game's cover, loaded now (after the display changed hands) */
     /* The launch screen's entrance (0..1, about half a second): the library
      * still shows under it until it is 1. */
@@ -168,6 +177,86 @@ public:
     }
 #ifdef PORPOISE_HOST_PREVIEW
     void preview_setup_step(int step) { ws_step_ = step; } /* tools/ui-preview: show each step */
+#ifdef PORPOISE_HOST_PREVIEW
+    /* tools/ui-preview: the Controllers pages (PV_CTL=1). */
+    void preview_controllers(int step, bool move, int controller, int point, int row)
+    {
+        if (screen_ != Screen::WiiSetup)
+            open_wii_setup(nullptr, false, "");
+        ws_move_ = move;
+        ws_controller_ = controller;
+        ws_step_ = step;
+        ws_point_ = point;
+        ws_row_ = row;
+    }
+    /* tools/ui-preview: the Controller Hub (view 0 the tiles, 1 every setting; open a section). */
+    void preview_ctl_hub(bool move, int controller, int view, int open, int focus, int sub)
+    {
+        if (screen_ != Screen::WiiSetup)
+            open_wii_setup(nullptr, false, "");
+        ws_move_ = move;
+        ws_controller_ = controller;
+        ws_step_ = kWsController;
+        ws_view_ = view;
+        ws_open_ = open;
+        ws_focus_ = focus;
+        ws_front_ = sub;
+        ws_sub_ = sub;
+        ws_scroll_ = ws_scroll_to_;
+        ws_pic_ = -2;
+        ws_pic_was_ = -1;
+    }
+    /* 4.5 Beta 4: the hub on another player's page, holding hold, playing as as. */
+    void preview_hub_player(int player, int hold, int as)
+    {
+        static const char *const holds[4] = {"", "wii_p2_hold", "wii_p3_hold", "wii_p4_hold"};
+        static const char *const ases[4] = {"", "wii_p2_as", "wii_p3_as", "wii_p4_as"};
+        if (player > 0)
+        {
+            ws_eff_.set(holds[player], std::to_string(hold));
+            ws_eff_.set(ases[player], std::to_string(as));
+        }
+        ws_player_ = player;
+        ws_player_at_ = -10;
+        ws_pcol_ = hold;
+        ws_prow_ = 0;
+        ws_pill_x_ = -1;
+    }
+    void preview_glass(bool menu, int row, bool island)
+    {
+        gl_menu_ = menu;
+        gl_row_ = row;
+        isl_open_ = island;
+    }
+    void preview_ctl_toasts()
+    {
+        ctl_toasts_.clear();
+        ctl_toast(0, "PlayStation Move connected", "Player 1 \xC2\xB7 Wii Remote");
+        ctl_toast(2, "Move battery low", "Player 1 \xC2\xB7 charge it soon");
+        ctl_toast(3, "PlayStation Move disconnected", "Player 1 is the DualSense again");
+    }
+#endif
+    void preview_look_changed() { apply_look(); }
+    void preview_ingame_hub(bool recal) { open_wii_setup_in_game(recal); } /* tools/ui-preview */
+    bool preview_ingame_hub_open() const { return ws_in_game_; }
+    void preview_wii_guide() { open_wii_guide(); }
+    void preview_island_pick(int i) { isl_pick_ = i; } /* tools/ui-preview */
+    void preview_move_pointer(float x, float y, bool on) /* tools/ui-preview: the Move's pointer there */
+    {
+        preview_mp_x_ = x;
+        preview_mp_y_ = y;
+        mp_on_ = on;
+    }
+    float preview_mp_x_ = -1, preview_mp_y_ = -1;
+    void preview_dialog(bool danger) /* tools/ui-preview */
+    {
+        open_dialog(DialogKind::Info, "Reinitialize Porpoise?",
+                    "Every setting, and each game's own settings, go back to how Porpoise ships, and it starts again "
+                    "as it did the first time. Your games, folders, memory cards, saves and save states stay.",
+                    "Reinitialize");
+        dialog_.danger = danger;
+        dialog_.no = "Cancel";
+    } /* tools/ui-preview */ /* tools/ui-preview: a look set from outside */
     void preview_launch_start(double t) { launch_start_ = t; } /* tools/ui-preview: the entrance's clock */
     void preview_game_settings(int i) { open_game_settings(lib_->games()[std::size_t(i)]); } /* tools/ui-preview */
     void preview_tile_art(int part, int row, const porpoise::tileart::Layer &l) /* tools/ui-preview */
@@ -286,7 +375,10 @@ public:
         return s;
     }
     /* The launch screen, while the emulator starts. progress < 0 = unknown. */
-    void begin_launch(Game *g);
+    /* clock: the time the launch screen is drawn with (draw_launch's), so its
+     * entrance plays every launch, not only the first (the menus' own clock
+     * stands still while a game runs). */
+    void begin_launch(Game *g, double clock = -1); /* (-1: the menus' clock, tools/ui-preview) */
     void set_launch_status(const std::string &status, float progress);
     void draw_launch(double time);
     /* Covers live on a device; after a device change they must be reloaded. */
@@ -307,6 +399,7 @@ public:
     }
     /* Where a game's own settings are kept (they may not exist). */
     std::string game_settings_path(const Game &g) const;
+    void auto_apply_picks(const Game &g); /* 4.6: Porpoise's Picks, the first time (ui_app_settings.cpp) */
 
     /* The in-game menu (Options + touch pad), over the paused game.
      * play: the settings the game runs with; quick changes go there and into
@@ -378,6 +471,9 @@ public:
     /* Black over everything at amount (0..1), with Porpoise's mark in the
      * middle: leaving a game, coming back, and the start. */
     void draw_curtain(float amount);
+    /* A line under the curtain's mark ("Saving your place..."), "" for none. */
+    void set_curtain_note(const std::string &note) { curtain_note_ = note; }
+    std::string curtain_note_;
     /* The menus' entrance: everything but the background faded by `fade` and
      * lowered by `dy` design pixels (Porpoise starting, or back from a game). */
     void set_intro(float fade, float dy)
@@ -387,6 +483,18 @@ public:
     }
     /* Buttons already down count only once they've been let go. */
     void swallow_held() { held_ = prev_ = 0xFFFFFFFFu; }
+    /* The boot (ui_app_boot.cpp): Sonar, over the menus as they come up. Once a
+     * frame before update: true while it keeps the buttons (any button skips
+     * ahead to the landing). Drawn after draw(). Events for main to act on:
+     * kBootMusic, the music comes in now; kBootSkipped, the hum stops. */
+    void start_boot(bool legacy_music);
+    bool boot_on() const { return boot_on_; }
+    bool boot_frame(const Input &in, bool ready); /* ready: frames come steadily (it waits for them) */
+    void draw_boot();
+    void draw_move_pointer(); /* the Move's pointer, over the menus (ui_app_movepointer.cpp) */
+    static constexpr int kBootMusic = 1, kBootSkipped = 2;
+    int take_boot_events();
+    void preview_boot_time(double t) { preview_boot_t_ = t; } /* tools/ui-preview */
     /* The menu language changed (rebuilds Settings' rows). */
     void language_changed() { build_settings(); }
     /* A message with an OK button. */
@@ -533,6 +641,9 @@ private:
         bool rescan = false; /* changing it searches the library again */
         bool beta = false;   /* a BETA badge after the label */
         bool alpha = false;  /* with beta: the badge says ALPHA (3.1's frame generation) */
+        bool subhead = false; /* 4.5: a heading inside a tab (label: its name), not a row you stop on */
+        bool indent = false;  /* drawn a step in: under an opened row (the credits) */
+        std::string group;    /* the part of the tab it's in (the section it had before 4.5) */
     };
     enum class DialogKind
     {
@@ -795,7 +906,7 @@ private:
     }
     bool nav(std::uint32_t bit, float &timer, double dt);
     Texture *cover_of(Game &g);
-    Texture *picture(Texture *&tex, bool &tried, std::string &wait,
+    Texture *picture(Texture *&tex, Texture *&old, bool &tried, std::string &wait,
                      std::string (Library::*where)(const Game &) const, const Game &g);
     static bool cover_loading(const Game &g) { return !g.cover && !g.cover_wait.empty(); }
     Texture *disc_of(Game &g);
@@ -876,7 +987,10 @@ private:
     void add_recommended_rows();
     /* 4.0: the Show All Settings switch first, and with it off only the
      * settings most players need. */
-    void simplify_rows(bool per_game);
+    void consolidate_rows(bool per_game);
+    bool row_stop(int i) const;  /* a settings row you can stop on (not a heading) */
+    void settle_settings_row(); /* onto one, after a rebuild */
+    bool credits_open_ = false; /* About > Credits shown */
     void set_own_count();
     void add_cheat_rows();
     std::vector<Cheat> cheats_;
@@ -965,7 +1079,7 @@ public:
     void show_setup_check(bool first_start);
     /* The first start (and after Reinitialize): a theme to begin with, then
      * the welcome and setup check (ui_app_welcome.cpp). */
-    void start_welcome();
+    void start_welcome(bool upgrade = false); /* upgrade: 4.5's welcome, a look and nothing else */
     /* The game's sound as it is running: pulled from Dolphin's mixer, or Classic. */
     void set_sound_pulled(bool pulled);
     /* A first start found a Porpoise folder on a drive (path, the drive's
@@ -1041,6 +1155,29 @@ private:
     void draw_memory_cards(double time);
     void draw_card(Card &card, int which, float x, float y, double time);
     void draw_brand(float cy);
+    float draw_wordmark(float x, float cy, float h, float alpha, int style);
+    Texture *wordmark_ = nullptr, *wordmark_mark_ = nullptr;
+    bool wordmark_tried_ = false;
+    /* The boot: where the look drew its wordmark (x, cy, h) and how, this frame,
+     * for it to land on; the welcome's dolphin (cx, cy, width) the same. Hidden
+     * (brand_alpha) until the boot's wordmark is there. */
+    float brand_box_[3] = {0, 0, 0};
+    int brand_style_ = 0;
+    bool brand_seen_ = false;
+    float welcome_mark_[3] = {0, 0, 0};
+    int welcome_mark_style_ = 0;
+    bool welcome_mark_seen_ = false;
+    float brand_alpha() const;
+    void draw_welcome_mark(float cx, float cy, float width, bool ink, float alpha);
+    float boot_time() const;
+    bool boot_on_ = false, boot_legacy_ = false, boot_sound_ = false, boot_music_ = false;
+    double boot_t0_ = 0, preview_boot_t_ = -1;
+    int boot_events_ = 0;
+    std::uint32_t boot_prev_ = 0;
+    static constexpr int kTraceSteps = 12;   /* assets/brand/boot/trace-*.png (tools/make-wordmark.py) */
+    static constexpr float kTraceFull = 0.6f; /* ...the last one this far through drawing an outline */
+    Texture *boot_glow_ = nullptr, *boot_big_ = nullptr, *boot_trace_[kTraceSteps] = {};
+    bool boot_started_ = false;
     /* The Porpoise mark, centred: the textured logo when it is there. */
     bool draw_mark(float cx, float cy, float width, Color tint);
     Texture *save_icon(Save &s);
@@ -1051,6 +1188,20 @@ private:
      * twelve to a page, pointed at with the controller's motion. */
     bool revolution() const { return settings_ && settings_->ui_theme == 1; }
     bool starcube() const { return settings_ && settings_->ui_theme == int(ThemeId::StarCube); }
+    /* 4.1: the new Porpoise (liquid glass, lit by the game you're on). */
+    bool glass() const { return settings_ && settings_->ui_theme == int(ThemeId::Glass); }
+    /* The library's view as drawn now: Revolution's Library View keeps its choice;
+     * Porpoise is a cover flow or rows (the shelf's moves); Classic a cover flow. */
+    int lib_view_now() const
+    {
+        if (!settings_)
+            return 0;
+        if (glass())
+            return settings_->glass_layout == 1 ? 3 : 0;
+        if (revolution())
+            return std::clamp(settings_->lib_view, 0, 9);
+        return 0;
+    }
     int mc_view() const { return starcube() ? 3 : settings_->mc_view; } /* Star Cube's saves are cubes */
     bool home_showing() const /* the grid of tiles (the Revolution look's home, laid out as a grid) */
     {
@@ -1135,6 +1286,8 @@ private:
     void draw_frames(const BannerTex &b, float x, float y, float w, float h, float fade, float radius, bool fill);
     float intro_fade_ = 1, intro_dy_ = 0;
     float rail_glide_ = -1, row_glide_ = -1; /* Settings' highlights, gliding */
+    float set_scroll_ = 0, set_scroll_to_ = 0; /* a tab's rows, scrolled (4.5's glass settings) */
+    std::string set_scroll_tab_;
     float rail_scroll_ = -1; /* Settings' section list: the first row shown (it scrolls when they don't all fit) */
     double glide_time_ = 0;
     /* The entrance in steps: what starts later (delay, of the whole) comes
@@ -1179,10 +1332,154 @@ private:
     std::vector<int> sc_recent_games() const;
     Action update_starcube(bool left, bool right, bool up, bool down, bool &handled);
     void draw_starcube(double time);
-    Action update_welcome(bool left, bool right, double dt);
+    /* The Porpoise look (ui_app_glass.cpp): cases lit by the game you're on, the
+     * filters along the top, the island, the menu that grows into Settings. */
+    Action update_glass(bool left, bool right, bool up, bool down, double dt, bool &handled);
+    void glass_tick(double dt);
+    void draw_glass(double time);
+    void draw_glass_flow(double time, float alpha);
+    void draw_glass_rows(double time, float alpha);
+    void draw_glass_title(Game &game, float cy, float alpha);
+    void draw_glass_details(double time, float alpha);
+    void draw_glass_filters(float alpha);
+    void draw_glass_menu(float alpha);
+    void draw_glass_settings(float alpha);
+    void draw_glass_states(double time);
+    void draw_glass_launch(double time, float k, float bg, float rise, float words);
+    bool gl_launching_ = false; /* Play pressed: the library parts for the launch screen */
+    float gl_exit_ = 0;         /* how far it has parted, 0..1 */
+    std::string glass_row_value(const SettingRow &r, int *index = nullptr) const;
+    std::string glass_section_value(const std::string &section) const;
+    void draw_glass_brand(float alpha);
+    void draw_glass_prompts(const std::vector<std::pair<Glyph, std::string>> &items, float alpha, bool over_dialog = false);
+    float draw_platform(const Game &game, float x, float cy, float h, float alpha); /* its icon; returns the width */
+    void glass_open_menu();
+    void glass_switch_filter(); /* the filter L1 / R1 asked for, now (gl_fpend_) */
+    void glass_filters(std::vector<int> &shows) const; /* the filters there are games for */
+    struct GlassItem
+    {
+        int kind = 0; /* 1 Sort By, 2 Get Covers, 3 Memory Cards, 4 a heading, 5 a Settings tab, 6 Show, 7 Full Settings, 8 Favorite */
+        int section = -1;
+        std::string label, value;
+    };
+    std::vector<GlassItem> glass_items();
+    bool gl_menu_ = false;
+    int gl_row_ = 0;
+    float gl_menu_first_ = 0;
+    float gl_hi_ = -1;                              /* the menu's highlight, gliding */
+    float gl_slab_[4] = {1960, 28, 612, 1024};      /* the menu's glass as it is: x y w h */
+    float gl_slab_a_ = 0;
+    float gl_slab_v_ = 0;      /* its left edge's speed (a spring: it eases in and out) */
+    bool gl_menu_seen_ = false; /* the glass has the menu on it (it was opened, and hasn't left the screen since) */
+    /* The menu dragged in (or out) along the touch pad: how open it is, 0..1,
+     * following the finger; let go, it opens or closes. */
+    bool gl_dragging_ = false;
+    int gl_drag_start_ = 0;  /* +1 a drag in from the right began, -1 one out (update_glass takes it) */
+    bool gl_drag_let_go_ = false;
+    bool gl_menu_drag_in_ = true; /* the drag is opening it (else closing) */
+    float gl_drag_ = 0, gl_drag_speed_ = 0;
+    /* L1 / R1: the filter changes as the cases slide away and back. */
+    int gl_fpend_ = -1, gl_fdir_ = 1;
+    float gl_fout_ = 0, gl_fin_ = 0;
+    int gl_preload_ = 0;
+    float gl_back_ = 0; /* Details closing: 1 -> 0 as the case flies back into the row */
+    float gl_part_ = 0; /* Details opening: the library's other cases fading apart (draw_glass_flow / rows) */
+    double gl_heart_at_ = -10; /* when a favourite was set or cleared (Details' heart) */ /* the next game whose cover is fetched ahead, unseen */
+    float gl_amb_[6] = {0.10f, 0.30f, 0.60f, 0.30f, 0.20f, 0.60f}; /* the room's colours, eased */
+    float gl_turn_ = 0;                            /* Details: the right stick's turn of the case */
+    double gl_turn_idle_ = 0;
+    float gl_line_x_ = -1, gl_line_w_ = 0;          /* the filter's underline, gliding */
+    float gl_line_tx_ = -1, gl_line_tw_ = 0;        /* where it's going */
+    float gl_hi_to_ = -1, gl_first_to_ = 0;         /* the menu's highlight and scroll, where they're going */
+    double gl_drawn_at_ = -1;                       /* the last frame drawn: after a pause, things snap */
+    bool gl_snap_ = false;
+    float gl_page_ = 0;                            /* Settings or Memory Cards in the glass: 0..1 */
+    Texture *gl_wii_ = nullptr, *gl_gc_ = nullptr;
+    bool gl_icons_tried_ = false;
+    /* assets/ui/controllers.png (tools/make-controller-icons.py): the
+     * controllers' pictures, then a heart, filled and outlined. */
+    Texture *gl_ctl_ = nullptr, *gl_dolphin_ = nullptr;
+    bool gl_ctl_tried_ = false;
+    void ctl_art(int which, float cx, float cy, float size, Color c);
+    float battery_icon(float right, float cy, int level, Color c); /* level 0..5, 6 charging; its width */
+    /* The island, top right: what's connected and the time. A swipe down the
+     * touch pad opens it, a swipe up closes it; news drops down out of it. */
+    void island_tick(double dt);
+    void draw_island(int style); /* 0 Porpoise, 1 Classic */
+    void camera_icon(float cx, float cy, float size, Color ink);
+    /* A piece of the Porpoise look's glass: bright is the chosen button's white. */
+    void glass_pill(float x, float y, float w, float h, float r, float alpha, bool bright = false);
+    /* 4.5: the side menu, the island and the in-game menu in every theme (ui_app_glass.cpp). */
+    void set_skin();
+    void menu_haptics(); /* the ticks under the finger (porpoise::pad::menu_tick) */
+    int hap_sel_ = -1, hap_row_ = -1, hap_set_ = -1, hap_rail_ = -1, hap_drag_ = -1, hap_isl_ = -1;                                                    /* their colors: the theme's */
+    void skin_select(float x, float y, float w, float h, float r, float a); /* a chosen row */
+    void open_menu_tab(int tab);
+    Action update_side_menu(bool left, bool right, bool up, bool down, bool &handled);
+    Action update_menu_rows(bool left, bool right, bool up, bool down);
+    void draw_side_menu();
+    /* How draw_box3d draws a case for the Porpoise look: a Wii game's in white
+     * plastic, a little darker off to the side, its reflection on the floor. */
+    float box_bright_ = 1, box_reflect_ = 0;
+    bool box_white_wii_ = false;
+    bool isl_open_ = false;
+    /* The island's shortcuts (Oct 24): Memory Cards, Settings, Online,
+     * Screenshots. The finger on the touch pad picks one (where it is across
+     * the pad), a click of the pad opens it. -1: none picked. */
+    int isl_pick_ = -1;
+    Texture *isl_sc_tex_ = nullptr;
+    bool isl_sc_tried_ = false;
+    void island_shortcut(int which);
+    /* The Move's pointer in Porpoise's own menus (Oct 24): the in-game menu,
+     * and the Porpoise look's library and a game's page (there, the Move's
+     * Start held a second turns it on and off). Point, and pull T to press;
+     * hold T and sweep to go along. ui_app_movepointer.cpp */
+    struct MpHit
+    {
+        float x, y, w, h;
+        int id;
+    };
+    enum : int
+    {
+        kMpGame = 1000,    /* + the game's place in the library */
+        kMpDetails = 2000, /* + a game page's button */
+        kMpTab = 3000,     /* + an in-game menu's tab */
+        kMpRow = 4000,     /* + its row */
+    };
+    std::vector<MpHit> mp_hits_, mp_next_; /* drawn last frame; being drawn */
+    bool mp_on_ = false;                   /* the library's: turned on */
+    bool mp_live_ = false;                 /* pointing, this frame */
+    float mp_x_ = 960, mp_y_ = 540;
+    int mp_hover_ = -1, mp_hover_was_ = -1, mp_press_on_ = -1;
+    bool mp_t_ = false, mp_dragged_ = false;
+    float mp_t_x_ = 0, mp_t_y_ = 0;
+    unsigned mp_holds_ = 0;
+    bool mp_holds_seen_ = false;
+    /* This frame: T let go over mp_click_ (a hit's id, -1 none); the pointer
+     * moved onto mp_moved_to_; steps swept (one given a frame); Start held. */
+    int mp_click_ = -1, mp_moved_to_ = -1, mp_steps_ = 0;
+    bool mp_hold_ = false;
+    void mp_hit(float x, float y, float w, float h, int id);
+    void mp_frame(std::uint32_t &held, bool active, bool vertical, float step_px);
+    int mp_take_step();
+    float isl_w_ = 0, isl_h_ = 0, isl_tw_ = 300, isl_th_ = 64; /* as it is, and as it's going */
+    bool isl_touch_ = false, isl_swiped_ = false;
+    /* The island dragged open (or shut) along the touch pad: how open, 0..1, on the finger. */
+    bool isl_dragging_ = false;
+    float isl_drag_ = 0, isl_drag_base_ = 0, isl_drag_speed_ = 0;
+    int isl_y0_ = 0, isl_x0_ = 0;
+    bool gl_ach_ = false;     /* a game's page: its achievements' list shown */
+    float gl_ach_k_ = 0, gl_ach_first_ = 0, gl_ach_first_to_ = 0;
+    int gl_ach_row_ = 0;
+    double gl_swipe_at_ = -1;
+    double isl_t0_ = 0;
+    double isl_drawn_at_ = -1; /* drawn again after a pause: it's the size it's going to */
+    Action update_welcome(bool up, bool down, bool left, bool right, double dt);
     void draw_welcome(double time);
     void welcome_card(int which, float cx, float cy, float w, float h, float lift, float alpha, bool on, double time);
-    int welcome_pick_ = 0;
+    int welcome_pick_ = 0; /* a card, or 3: Porpoise Legacy, under them */
+    bool welcome_upgrade_ = false;
+    float welcome_legacy_ = 0; /* the Legacy line chosen, gliding */
     float welcome_time_ = 0, welcome_glide_ = 0;
     void draw_sc_home(double time, float zoom);
     void draw_sc_drift(double time, float alpha, float rush = 0);
@@ -1340,12 +1637,14 @@ private:
     Texture *shot_full_ = nullptr;
     int shots_total_ = -1;      /* Settings > Screenshots' count: -1 counted again when asked */
     std::string bios_found_;    /* About's GameCube BIOS line, found when Settings opens */
+    bool segaboot_found_ = false; /* the Triforce's SegaBoot in bios/ (About) */
     bool bios_looked_ = false;
     std::string shot_full_for_, shot_full_wait_;
     std::string launch_state_; /* the state to start the launched game from */
     void draw_controller_lines(float x, float y, float w, const porpoise::pad::Mapping &m);
     /* A Wii game's controls: the DualSense as held, each Wii button on its control.
      * live_pose: how the first (second) controller is held right now, or -1. */
+    void draw_hub_buttons(float x, float y, float w, float h, float alpha); /* the in-game menu's Controls tab: the hub's Buttons */
     void draw_wii_controls(float x, float y, float w, float h, const porpoise::pad::WiiConfig &wii, float alpha,
                            int live_pose = -1, int live_pose_second = -1);
     std::pair<float, float> draw_wii_pad(const porpoise::pad::WiiLayout &lay, int pose, float bx, float by,
@@ -1359,7 +1658,8 @@ private:
     void draw_wii_guide(double time);
     /* The Wii Remote setup (before a Wii game, from Settings, or from the
      * pause menu). */
-    Action start_game(Game *g, const std::string &state, bool resume_asked = false);
+    /* quick: Options (the controller's start) - straight in, past the Wii controller setup. */
+    Action start_game(Game *g, const std::string &state, bool resume_asked = false, bool quick = false);
     Game *resume_game_ = nullptr; /* the game the quick-resume question is about */
     void close_dialog();
     void draw_check_mark(float cx, float cy, float size, bool ok);
@@ -1369,7 +1669,9 @@ private:
     void wii_setup_apply_pad();
     void close_wii_setup();
     Settings &ws_settings();
-    void ws_store(const char *key, int value);
+    /* everywhere: every game's whatever the hub's scope (the room's calibration,
+     * the ball's color, what the player holds). */
+    void ws_store(const char *key, int value, bool everywhere = false);
     enum WiiStep
     {
         kWsController,
@@ -1378,11 +1680,192 @@ private:
         kWsCentre,
         kWsTopLeft,
         kWsBottomRight,
-        kWsTry,
-        kWsTune, /* advanced: smoothing, reach, grip, presets */
+        kWsTry,  /* Test & Tune: target practice, the swing meter, feel, speed and swing strength */
+        kWsTune, /* Save as Template: a slot and a name */
+        kWsPoints, /* Calibrate the pointer: the middle and the four corners, each taken when held still */
+        kWsReady,  /* before the five points: what's coming, and Ready */
     };
     int ws_step_ = kWsController;
     int ws_controller_ = 0;
+    bool ws_move_ = false;        /* the PlayStation Move is the Remote (wii_move) */
+    bool ws_nav_ = false;         /* with it, the Nunchuk a Navigation controller (wii_nav, alpha) */
+    int ws_point_ = 0;            /* kWsPoints: which of the five */
+    int ws_color_ = 0;            /* the Move's ball color row: the color in focus, 8 ignore lights, 9 forget them */
+    float ws_pts_[5][2] = {};     /* each point's yaw and pitch from the middle */
+    double ws_still_from_ = -1;   /* held still on the point since */
+    int ws_action_ = 0;           /* the Controllers page's buttons: which one */
+    int ws_tune_from_ = kWsTry;   /* where Save as Template goes back to */
+    /* Where the pointer can choose something (drawn last frame): a row and a choice. */
+    struct WsHit
+    {
+        float x, y, w, h;
+        int row, choice;
+    };
+    static constexpr int kWsLocked = -10; /* a WsHit's choice: kWsLocked - n, controller n not here yet */
+    std::vector<WsHit> ws_hits_;
+    bool ws_pointing_ = false;    /* the pointer leads (it moved since the D-pad was used) */
+    float ws_px_ = 960, ws_py_ = 540, ws_rest_x_ = 960, ws_rest_y_ = 540;
+    int ws_hover_ = -1;           /* the hit the pointer is on */
+    int ws_target_ = 0, ws_hits_n_ = 0, ws_misses_n_ = 0;
+    double ws_hit_time_ = -10;
+    float ws_swing_ = 0, ws_swing_peak_ = 0;
+    bool map_from_ws_ = false;    /* Customize buttons was opened from the Controllers page */
+    void ws_pointer_step(bool dpad);
+    bool ws_choose(int row, int choice);
+    std::vector<int> ws_tune_rows() const;
+    /* ---- the Controller Hub (ui_app_controls.cpp): the main controller and the
+     * second, then three tiles (Hold it, Calibrate, Feel) or every setting in
+     * sections that fold open, one at a time, the picture beside them following
+     * the open one. */
+    struct HubRow
+    {
+        int id = 0;
+        int kind = 0; /* HubKind */
+        std::string label;
+        std::vector<std::string> opts, tags;
+        std::vector<int> icons;
+        std::vector<bool> ok;
+        int cur = -1;      /* the choice made (a segment, a tile) */
+        float frac = 0;    /* a slider's place */
+        std::string value; /* a slider's value, or a text row's words */
+    };
+    struct HubSection
+    {
+        int id = 0;
+        std::string name, summary;
+        bool locked = false;
+        std::vector<HubRow> rows;
+    };
+    std::vector<HubSection> ctl_sections();
+    Action update_ctl_hub(bool up, bool down, bool left, bool right);
+    void draw_ctl_hub(double time);
+    bool ctl_change(int row, int dir, int choice = -1);
+    bool ctl_activate(int row, int which);
+    void ctl_scene(int scene, float x, float y, float w, float h, float alpha, bool small);
+    void ctl_line(float x0, float y0, float x1, float y1, float width, Color c);
+    /* Ruben's controller diagrams (assets/ui/diagrams), each control labeled beside
+     * the picture, its line leaving the control straight out, turning, then
+     * running across to the label. */
+    enum DiaKind
+    {
+        kDiaDualSense,
+        kDiaMove,
+        kDiaNav,
+        kDiaRemote,
+        kDiaEye,
+        kDiaKinds,
+    };
+    struct DiaLabel
+    {
+        std::string anchor; /* the control's name in the diagram */
+        int side = -1;      /* 0 left, 1 right, 2 above, 3 below; -1 the side it's on */
+        int chip = -1;      /* a Wii button's chip (WiiInput), -1 none */
+        std::string title, sub;
+        bool dim = false;   /* (not used) */
+    };
+    struct DiaBox
+    {
+        float x = 0, y = 0, w = 0, h = 0, k = 0; /* where the picture went, and its scale */
+    };
+    /* turn: 0 as drawn, 1 a quarter anticlockwise (stood on its right end), 2 clockwise. */
+    DiaBox draw_diagram(int kind, const std::vector<DiaLabel> &labels, float x, float y, float w, float h, float alpha,
+                        int turn = 0);
+    std::vector<DiaLabel> ds_labels(const porpoise::pad::WiiLayout &lay, bool upright);
+    std::vector<DiaLabel> move_labels();
+    std::vector<DiaLabel> gc_labels(const porpoise::pad::Mapping &m);
+    Texture *dia_tex_[kDiaKinds] = {};
+    bool dia_tried_ = false;
+    void ctl_keep();
+    /* 4.5 Beta 4: whose controller the hub shows (0..3, L1 / R1 or the
+     * switcher at the top). Player 1 has the whole hub; players 2 to 4 a page of
+     * their own: what they hold, what it plays as, and whether it's here. */
+    int ws_player_ = 0;
+    int ws_player_dir_ = 1;     /* the page slides in from this side */
+    double ws_player_at_ = -10; /* when it changed */
+    std::uint32_t ws_shoulder_ = 0; /* L1 or R1 down, to switch players on a tap's release */
+    double ws_shoulder_at_ = -10;
+    float ws_pill_x_ = -1;      /* the switcher's highlight, sliding to the player's */
+    double ws_pill_t_ = 0;
+    int ws_prow_ = 0, ws_pcol_ = 0; /* players 2 to 4's page: the row and tile the D-pad is on */
+    void hub_player(int to);
+    void draw_hub_switcher(double time);
+    void draw_hub_player(double time);
+    Action update_hub_player(bool up, bool down, bool left, bool right, bool cross, const WsHit *hover);
+    /* A player's light bar color as Porpoise draws it (Settings > Controls), 0xRRGGBB. */
+    std::uint32_t player_hex(int player) const;
+    int ws_view_ = 0;       /* 0 the three tiles, 1 every setting */
+    int ws_open_ = -1;      /* the section open (HubSec), -1 none */
+    int ws_focus_ = 0;      /* what the D-pad is on (HubFocus, or a row's id) */
+    int ws_sub_ = 0;        /* within it: a button, a swatch, a tile */
+    int ws_front_ = 0;      /* the three tiles: which */
+    int ws_scope_ = 1;      /* 0 just this game, 1 every Wii game */
+    bool ws_dirty_ = false; /* something kept since the hub opened */
+    Settings ws_eff_;       /* the values shown: every game's, with this game's own over them */
+    float ws_scroll_ = 0, ws_scroll_to_ = 0;
+    double ws_nav_time_ = -10, ws_last_t_ = 0;
+    float ws_ptr_a_ = 0;  /* the pointer's fade */
+    float ws_trace_[180] = {}; /* the swing, a sample a frame (Motion and feel's picture) */
+    int ws_trace_n_ = 0;
+    double ws_trace_acc_ = 0; /* time toward the swing graph's next sample */
+    float ws_trail_[10][2] = {};
+    int ws_trail_n_ = 0;
+    int ws_pic_ = -1, ws_pic_was_ = -1; /* the picture shown, and before it (they cross-fade) */
+    double ws_pic_at_ = -10;
+    float ws_last_swing_ = 0;
+    double ws_last_swing_at_ = -10;
+    void draw_move_pad(float x, float y, float w, float h, float alpha, bool labels = true);
+    /* What the PS3 Eye sees (mirrored, as the player sees it), the ball marked. */
+    void draw_eye_view(float x, float y, float w, float h, float alpha);
+    Texture *eye_tex_ = nullptr;
+    unsigned eye_seq_ = 0;
+    std::vector<std::uint8_t> eye_px_;
+    /* The Move's ball as Porpoise draws it (Settings: Move Ball Color), 0xRRGGBB. */
+    std::uint32_t ball_hex() const;
+    /* The ball lit in its color on the Move's picture (controllers.png's, drawn
+     * side wide at cx, cy). */
+    void draw_move_ball(float cx, float cy, float side, float alpha = 1.0f);
+    /* Draws with the colors as given, not the look's (its hue, saturation, one
+     * color): the ball's color has to read as the ball's. */
+    template <class F> void in_true_color(F &&draw)
+    {
+        Gfx &g = *g_;
+        const bool toned = g.toned();
+        g.set_tone(false);
+        const Look was = g.look();
+        Look full = was;
+        full.hue = -1;
+        full.saturation = 1;
+        full.dark = 1;
+        full.fill_alpha = 1;
+        full.mono = false;
+        full.panel_style = 0; /* (glass would tint the fill) */
+        g.set_look(full);
+        const bool solid = g.solid();
+        g.set_solid(true);
+        draw();
+        g.set_solid(solid);
+        g.set_look(was);
+        g.set_tone(toned);
+    }
+    /* Controllers coming and going, the Move's battery: a notice in the look in use,
+     * and each player's controller by the clock. */
+    struct CtlToast
+    {
+        int icon = 0; /* 0 Move, 1 DualSense, 2 battery, 3 Move gone */
+        std::string title, sub;
+        double at = 0;
+    };
+    std::vector<CtlToast> ctl_toasts_;
+    bool ctl_move_was_ = false, ctl_low_told_ = false, ctl_seen_ = false;
+    bool ctl_pad_was_[4] = {true, false, false, false};
+    int ctl_battery_ = -1;
+    void ctl_watch();
+    void ctl_toast(int icon, const std::string &title, const std::string &sub);
+    void draw_ctl_toasts();
+    void ctl_icon(int icon, float cx, float cy, float size, Color ink, Color ball);
+    /* The controllers, right-aligned to right_x: style 0 dark, 1 light, 2 Revolution
+     * (icons only), 3 Star Cube. Returns the width drawn. */
+    float draw_ctl_badges(float right_x, float cy, int style);
     Game *ws_game_ = nullptr;
     bool ws_launch_ = false;
     bool ws_in_game_ = false;    /* over the paused game */
@@ -1390,6 +1873,7 @@ private:
     bool ws_ask_ = true; /* the setup's game: offer the setup before it starts */
     int ws_row_ = 0;
     int ws_size_mode_ = 0;       /* 0 corners, 1 size and distance */
+    int ws_ig_marks_ = 0;        /* over a game: its first update and draw logged (1, 2) */
     int ws_preset_slot_ = 0, ws_preset_name_ = 0;
     std::string ws_state_;
     Screen ws_return_ = Screen::Main;
@@ -1560,6 +2044,7 @@ private:
     double nav_held_ = 0; /* how long a direction has been held in the library (speeds it up) */
     float lib_rep_l2_ = 0, lib_rep_r2_ = 0; /* the library's L2 / R2 letter jumps (not Details' timers) */
     double time_ = 0;
+    double ui_dt_ = 1.0 / 60.0; /* this frame's step (update's dt): 1/60, or 1/119.88 with the menus at 120 Hz */
 
     Game *launch_ = nullptr;
     std::string launch_status_;

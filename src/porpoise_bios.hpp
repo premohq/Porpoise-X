@@ -30,4 +30,8 @@ const GameCubeBios *for_region(const std::vector<GameCubeBios> &found, bool pal)
 /* Whether the 256-byte header of a file is a GameCube IPL's, and if so
  * whether it is PAL and its revision. */
 bool read_header(const unsigned char *head, std::size_t size, bool &pal, std::string &revision);
+/* The Triforce's SegaBoot (the arcade board's own firmware, segaboot.gcm) in
+ * dir or a folder right inside it, any case: its path, or "". The arcade
+ * games start without it; their test menu needs it. */
+std::string find_segaboot(const std::string &dir);
 } // namespace porpoise::bios

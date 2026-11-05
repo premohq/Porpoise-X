@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.5 — 2026-11-03
+
+The new Porpoise look (Light, Dark, OLED) with the side menu and the island;
+PlayStation Move as the Wii Remote (both models) with PS3 Eye drift
+correction; the Controller Hub, with a page for each of up to four players;
+the Navigation controller and players 2 to 4's Moves through REXCRAFT88's
+Move Management; Triforce arcade games (beta); Settings > Video > Refresh
+Rate (Fixed 120 Hz or VRR), frame generation under VRR, the menus at 120 Hz;
+every menu translated. See docs/release-notes-4.5.md.
+
+## 4.5 Beta 4 — 2026-11-01
+
+A beta: up to four players in Wii games. The Controller Hub has a page for
+each player (tap L1 / R1): what they hold (DualSense, PlayStation Move, Move +
+Navigation, Move + DualSense) and what their DualSense plays as. Players 2 to
+4's Moves, and the Navigation controller, connect through REXCRAFT88's Move
+Management. Saved for every Wii game.
+
+## 4.5 Beta 1 — 2026-10-26
+
+A beta: the new Porpoise look (Light, Dark, OLED) with the side menu
+(Triangle) and the island (swipe down on the touch pad); PlayStation Move as
+the Wii Remote with PS3 Eye drift correction; the Controller Hub; the
+Navigation controller as the Nunchuk through REXCRAFT88's Move Studio (alpha);
+Punch-Out!! at full speed and other speed work. See
+docs/release-notes-4.5-beta.1.md.
+
 ## 4.0 — 2026-10-21
 
 **New**

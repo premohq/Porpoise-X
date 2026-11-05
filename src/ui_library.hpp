@@ -27,6 +27,7 @@ struct Game
     long long last_played = 0; /* unix time, 0 = never */
     long long play_seconds = 0; /* time played in Porpoise, all told */
     bool favourite = false;
+    bool duplicate = false; /* the same disc again, in another file (Library::sort): hidden when asked */
     Texture *cover = nullptr;
     bool cover_tried = false;
     /* A picture still decoding (Gfx::texture_file_async): its file. */
@@ -43,6 +44,9 @@ struct Game
     Texture *spine = nullptr; /* the box's spine (the Box view) */
     bool spine_tried = false;
     std::string spine_wait;
+    /* Pictures replaced (new art came, or it was cut again): still drawn
+     * until their new ones have decoded, so nothing flashes empty. */
+    Texture *cover_old = nullptr, *disc_old = nullptr, *back_old = nullptr, *spine_old = nullptr;
     /* Not a library game: Settings > Console's GameCube Menu (1) or Wii Menu
      * (2), with this disc in the drive (boot_disc) or none. */
     int boot_menu = 0;
@@ -113,19 +117,36 @@ public:
         GameCube,
         Wii,
         Channels, /* WADs and homebrew apps */
+        Favourites,
     };
     void set_show(Show what) { show_ = what; sort(sort_); }
+    /* 4.5: a game kept twice (an ISO and an RVZ of it) shown once. */
+    void set_hide_duplicates(bool on) { hide_dupes_ = on; sort(sort_); }
+    bool hide_duplicates() const { return hide_dupes_; }
     Show show() const { return show_; }
     int shown() const { return shown_; }
-    bool shows(const Game &g) const
+    bool shows(const Game &g) const { return shows(g, show_); }
+    static bool shows(const Game &g, Show what)
     {
         /* Wii and GameCube: discs; channels, WiiWare, Virtual Console and
          * homebrew under Channels (and All). */
-        if (show_ == Show::All)
+        if (what == Show::All)
             return true;
-        if (show_ == Show::Channels)
-            return !g.kind.empty();
-        return g.kind.empty() && (show_ == Show::Wii) == (g.platform == "Wii");
+        /* (A Triforce arcade game is a disc too: under GameCube.) */
+        const bool disc = g.kind.empty() || g.kind == "Triforce";
+        if (what == Show::Channels)
+            return !disc;
+        if (what == Show::Favourites)
+            return g.favourite;
+        return disc && (what == Show::Wii) == (g.platform == "Wii");
+    }
+    /* How many games a filter would show. */
+    int count_shown(Show what) const
+    {
+        int n = 0;
+        for (const Game &g : games_)
+            n += shows(g, what) && !(hide_dupes_ && g.duplicate) ? 1 : 0;
+        return n;
     }
 
     /* Selection and play history, kept across launches. */
@@ -168,6 +189,7 @@ private:
     std::string selected_;
     Sort sort_ = Sort::Title;
     Show show_ = Show::All;
+    bool hide_dupes_ = false;
     int shown_ = 0;
     /* History of games not found in this search (a USB drive that's out):
      * kept, so it is there when they are back. */

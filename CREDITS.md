@@ -5,8 +5,38 @@ Porpoise would not exist without the people and projects below. Thank you.
 ## Porpoise
 
 **Ruben ([@elripalda](https://ripalda.dev))**: creator. The idea, the
-design direction, the logo and artwork, the menu music and every sound effect,
+design direction, the logo and artwork, the controller diagrams in the Controller
+Hub, the menu music and every sound effect,
 and all of the testing on real hardware.
+
+### Menu music
+
+**LOiME**: "Soundscape", the new look's menu music (looped for Porpoise).
+Ruben's own menu music plays in the legacy looks.
+
+### PlayStation Move
+
+**[REXCRAFT88](https://github.com/REXCRAFT88)**: his Move Studio work and his
+Porpoise branch
+([feature/move-nav-integration](https://github.com/REXCRAFT88/Porpoise-Dolphin-Emulator-for-PS5/tree/feature/move-nav-integration))
+inspired and shaped Porpoise's Move calibration:
+
+- centering while holding still also clears the gyroscope's drift
+- the Move's motion starts fresh when it reconnects
+- the pointer snaps to the middle when it's centered
+- the center from the setup carries into the game
+- the PS3 Eye looks for the ball's own color, and leaves out the room's other
+  lights
+- the ball colors to choose from
+
+The Navigation controller (since 4.5 Beta 1) and players 2 to 4's Moves (4.5
+Beta 4) come through his
+[Move Management](https://github.com/REXCRAFT88/Move-Management-PS5), and
+Porpoise reads them with his input client, `src/porpoise_move_bridge.hpp`
+(GPL-3.0-or-later), taken from his work with his blessing.
+
+His research into the Move, the Navigation controller and the PS3 Eye is a big
+part of where Move support goes next.
 
 ### Contributors
 

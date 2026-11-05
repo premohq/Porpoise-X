@@ -574,7 +574,7 @@ index a9737c1e0e..b1b57502bc 100644
    bool IsReadMode() const { return m_mode == Mode::Read; }
    bool IsWriteMode() const { return m_mode == Mode::Write; }
 diff --git a/Source/Core/Common/DirectIOFile.cpp b/Source/Core/Common/DirectIOFile.cpp
-index b09ffd176c..d9d9351bb4 100644
+index b09ffd176c..852f617f37 100644
 --- a/Source/Core/Common/DirectIOFile.cpp
 +++ b/Source/Core/Common/DirectIOFile.cpp
 @@ -3,6 +3,7 @@
@@ -594,7 +594,21 @@ index b09ffd176c..d9d9351bb4 100644
    {
      // used in Duplicate() later
      m_path = path;
-@@ -184,7 +185,7 @@ bool DirectIOFile::Close()
+@@ -170,6 +171,13 @@ bool DirectIOFile::Open(const std::string& path, AccessMode access_mode, OpenMod
+     flags |= O_CREAT;
+ 
+   m_fd = open(path.c_str(), flags, 0666);
++#ifdef __LIBRETRO__
++  if (m_fd >= 0)
++  {
++    m_path = path;
++    m_native_flags = flags & ~(O_CREAT | O_TRUNC | O_EXCL);
++  }
++#endif
+ 
+ #endif
+ 
+@@ -184,7 +192,7 @@ bool DirectIOFile::Close()
    m_current_offset = 0;
  
  #ifdef __LIBRETRO__
@@ -603,7 +617,7 @@ index b09ffd176c..d9d9351bb4 100644
    {
      int result = Libretro::VFile::Close(m_vfs_handle);
      m_vfs_handle = nullptr;
-@@ -202,7 +203,7 @@ bool DirectIOFile::Close()
+@@ -202,7 +210,7 @@ bool DirectIOFile::Close()
  bool DirectIOFile::IsOpen() const
  {
  #ifdef __LIBRETRO__
@@ -612,7 +626,7 @@ index b09ffd176c..d9d9351bb4 100644
      return m_vfs_handle != nullptr;
  #endif
  
-@@ -243,11 +244,18 @@ static bool OverlappedTransfer(HANDLE handle, u64 offset, auto* data_ptr, u64 si
+@@ -243,11 +251,18 @@ static bool OverlappedTransfer(HANDLE handle, u64 offset, auto* data_ptr, u64 si
  }
  #endif
  
@@ -632,7 +646,7 @@ index b09ffd176c..d9d9351bb4 100644
      if (Libretro::VFile::Seek(m_vfs_handle, offset, SEEK_SET) < 0)
        return false;
  
-@@ -266,8 +274,9 @@ bool DirectIOFile::OffsetRead(u64 offset, u8* out_ptr, u64 size)
+@@ -266,8 +281,9 @@ bool DirectIOFile::OffsetRead(u64 offset, u8* out_ptr, u64 size)
  bool DirectIOFile::OffsetWrite(u64 offset, const u8* in_ptr, u64 size)
  {
  #ifdef __LIBRETRO__
@@ -643,7 +657,7 @@ index b09ffd176c..d9d9351bb4 100644
      if (Libretro::VFile::Seek(m_vfs_handle, offset, SEEK_SET) < 0)
        return false;
  
-@@ -286,7 +295,7 @@ bool DirectIOFile::OffsetWrite(u64 offset, const u8* in_ptr, u64 size)
+@@ -286,7 +302,7 @@ bool DirectIOFile::OffsetWrite(u64 offset, const u8* in_ptr, u64 size)
  u64 DirectIOFile::GetSize() const
  {
  #ifdef __LIBRETRO__
@@ -652,7 +666,7 @@ index b09ffd176c..d9d9351bb4 100644
      return Libretro::VFile::GetSize(m_vfs_handle);
  #endif
  
-@@ -332,7 +341,7 @@ bool DirectIOFile::Seek(s64 offset, SeekOrigin origin)
+@@ -332,7 +348,7 @@ bool DirectIOFile::Seek(s64 offset, SeekOrigin origin)
  bool DirectIOFile::Flush()
  {
  #ifdef __LIBRETRO__
@@ -661,7 +675,7 @@ index b09ffd176c..d9d9351bb4 100644
      return Libretro::VFile::Flush(m_vfs_handle) == 0;
  #endif
  
-@@ -346,7 +355,7 @@ bool DirectIOFile::Flush()
+@@ -346,12 +362,13 @@ bool DirectIOFile::Flush()
  void DirectIOFile::Swap(DirectIOFile& other)
  {
  #ifdef __LIBRETRO__
@@ -670,7 +684,13 @@ index b09ffd176c..d9d9351bb4 100644
    {
      std::swap(m_vfs_handle, other.m_vfs_handle);
      std::swap(m_path, other.m_path);
-@@ -371,7 +380,7 @@ DirectIOFile DirectIOFile::Duplicate() const
+     std::swap(m_mode, other.m_mode);
+     std::swap(m_hints, other.m_hints);
++    std::swap(m_native_flags, other.m_native_flags);
+   }
+ #endif
+ 
+@@ -371,7 +388,7 @@ DirectIOFile DirectIOFile::Duplicate() const
      return result;
  
  #ifdef __LIBRETRO__
@@ -679,7 +699,27 @@ index b09ffd176c..d9d9351bb4 100644
    {
      // We need to reopen the file, since VFS handles cannot be duplicated.
      result.m_vfs_handle = Libretro::VFile::Open(
-@@ -415,7 +424,7 @@ DirectIOFile DirectIOFile::Duplicate() const
+@@ -403,6 +420,19 @@ DirectIOFile DirectIOFile::Duplicate() const
+   }
+ #else
+   result.m_fd = dup(m_fd);
++#ifdef __LIBRETRO__
++  // Porpoise: the PS5 refuses dup() here; the same file opened again by its
++  // path reads the same (Triforce games copy the disc this way).
++  if (result.m_fd < 0 && !m_path.empty())
++  {
++    result.m_fd = open(m_path.c_str(), m_native_flags, 0666);
++    if (result.m_fd >= 0)
++    {
++      result.m_path = m_path;
++      result.m_native_flags = m_native_flags;
++    }
++  }
++#endif
+ #endif
+ 
+   ASSERT(result.IsOpen());
+@@ -415,7 +445,7 @@ DirectIOFile DirectIOFile::Duplicate() const
  bool Resize(DirectIOFile& file, u64 size)
  {
  #ifdef __LIBRETRO__
@@ -688,7 +728,7 @@ index b09ffd176c..d9d9351bb4 100644
      return Libretro::VFile::Truncate(file.m_vfs_handle, size) == 0;
  #endif
  
-@@ -434,7 +443,7 @@ bool Rename(DirectIOFile& file, const std::string& source_path [[maybe_unused]],
+@@ -434,7 +464,7 @@ bool Rename(DirectIOFile& file, const std::string& source_path [[maybe_unused]],
              const std::string& destination_path)
  {
  #ifdef __LIBRETRO__
@@ -697,7 +737,7 @@ index b09ffd176c..d9d9351bb4 100644
      return file.IsOpen() && Libretro::VFile::Rename(source_path, destination_path);
  #endif
  
-@@ -460,7 +469,7 @@ bool Rename(DirectIOFile& file, const std::string& source_path [[maybe_unused]],
+@@ -460,7 +490,7 @@ bool Rename(DirectIOFile& file, const std::string& source_path [[maybe_unused]],
  bool Delete(DirectIOFile& file, const std::string& filename)
  {
  #ifdef __LIBRETRO__
@@ -707,7 +747,7 @@ index b09ffd176c..d9d9351bb4 100644
  #endif
  
 diff --git a/Source/Core/Common/DirectIOFile.h b/Source/Core/Common/DirectIOFile.h
-index 6bff9b04ef..e0eee81a3e 100644
+index 6bff9b04ef..d5f532fca6 100644
 --- a/Source/Core/Common/DirectIOFile.h
 +++ b/Source/Core/Common/DirectIOFile.h
 @@ -112,7 +112,7 @@ public:
@@ -719,8 +759,13 @@ index 6bff9b04ef..e0eee81a3e 100644
      ERROR_LOG_FMT(COMMON, "VFS: Attempt to use std::FILE in DirectIO which should not happen in VFS mode");
  #endif
  
-@@ -146,6 +146,9 @@ private:
+@@ -144,8 +144,14 @@ private:
+   std::string m_path;
+   unsigned m_mode{};
    unsigned m_hints{};
++  // Porpoise: a file's own open() flags (without create or truncate), to open
++  // it again by its path where dup() fails (the PS5: the Triforce's DIMM copy).
++  int m_native_flags{};
  
    friend bool Resize(DirectIOFile& file, u64 size);
 +  friend bool Rename(DirectIOFile& file, const std::string& source_path,
@@ -1372,6 +1417,24 @@ index 41afff087b..a5750cca86 100644
  #elif defined __FreeBSD__ || defined __OpenBSD__
    pthread_set_name_np(pthread_self(), name);
  #elif defined(__NetBSD__)
+diff --git a/Source/Core/Common/x64CPUDetect.cpp b/Source/Core/Common/x64CPUDetect.cpp
+index fa9cb0c15c..2018ff40a8 100644
+--- a/Source/Core/Common/x64CPUDetect.cpp
++++ b/Source/Core/Common/x64CPUDetect.cpp
+@@ -236,6 +236,13 @@ void CPUInfo::Detect()
+   // Computed flags
+   bFlushToZero = has_sse;
+   bBMI2FastParallelBitOps = bBMI2 && !is_amd_family_17;
++#ifdef __PROSPERO__
++  // Porpoise: the PS5's CPU is Zen 2, where PEXT and PDEP are microcoded and
++  // take hundreds of cycles. Whatever its CPUID says about the family, never
++  // use them: the JIT's float store conversion (every stfs) and the vertex
++  // loader's colour unpacking take the plain SSE paths instead.
++  bBMI2FastParallelBitOps = false;
++#endif
+   bCRC32 = bSSE4_2;
+ 
+   model_name = ReplaceAll(model_name, ",", "_");
 diff --git a/Source/Core/Core/AchievementHooks.h b/Source/Core/Core/AchievementHooks.h
 new file mode 100644
 index 0000000000..bc4d5fe73d
@@ -1888,18 +1951,19 @@ index 9dbb0450a8..9c587f607e 100644
      if (skip_count)
      {
 diff --git a/Source/Core/Core/Boot/Boot.cpp b/Source/Core/Core/Boot/Boot.cpp
-index 0cad29ee35..f9fb14bec5 100644
+index 0cad29ee35..0d581551ee 100644
 --- a/Source/Core/Core/Boot/Boot.cpp
 +++ b/Source/Core/Core/Boot/Boot.cpp
-@@ -36,6 +36,7 @@
+@@ -36,6 +36,8 @@
  #include "Core/ConfigManager.h"
  #include "Core/FifoPlayer/FifoPlayer.h"
  #include "Core/HLE/HLE.h"
++#include "Core/HLE/HLE_PorpoiseNative.h"
 +#include "Core/HLE/HLE_PorpoiseWidescreen.h"
  #include "Core/HW/DVD/AMMediaboard.h"
  #include "Core/HW/DVD/DVDInterface.h"
  #include "Core/HW/EXI/EXI_DeviceIPL.h"
-@@ -73,7 +74,7 @@ std::vector<std::string> ReadM3UFile(const std::string& m3u_path,
+@@ -73,7 +75,7 @@ std::vector<std::string> ReadM3UFile(const std::string& m3u_path,
    std::string newline;
  
  #ifdef __LIBRETRO__
@@ -1908,12 +1972,14 @@ index 0cad29ee35..f9fb14bec5 100644
    {
      lines = Libretro::VFile::ReadLines(m3u_path);
    }
-@@ -564,6 +565,8 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
+@@ -564,6 +566,10 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
          return false;
  
        SConfig::OnTitleDirectlyBooted(guard);
 +      // Porpoise: the universal widescreen, when chosen for this game.
 +      HLE_PorpoiseWidescreen::Apply(system, guard, *volume);
++      // Porpoise: hot routines run natively, for games that have them.
++      HLE_PorpoiseNative::Apply(system, guard, *volume);
        return true;
      }
  
@@ -1936,18 +2002,29 @@ index c4b5419a69..71778b9600 100644
      PanicAlertFmtT("Cannot boot this WAD because it could not be installed to the NAND.");
      return false;
 diff --git a/Source/Core/Core/CMakeLists.txt b/Source/Core/Core/CMakeLists.txt
-index baad9c0941..44681b89cf 100644
+index baad9c0941..5ffb9081f0 100644
 --- a/Source/Core/Core/CMakeLists.txt
 +++ b/Source/Core/Core/CMakeLists.txt
-@@ -131,6 +131,8 @@ add_library(core
+@@ -131,6 +131,10 @@ add_library(core
    HLE/HLE_Misc.cpp
    HLE/HLE_Misc.h
    HLE/HLE_OS.cpp
++  HLE/HLE_PorpoiseNative.cpp
++  HLE/HLE_PorpoiseNative.h
 +  HLE/HLE_PorpoiseWidescreen.cpp
 +  HLE/HLE_PorpoiseWidescreen.h
    HLE/HLE_OS.h
    HLE/HLE_VarArgs.cpp
    HLE/HLE_VarArgs.h
+@@ -509,6 +513,8 @@ add_library(core
+   NetworkCaptureLogger.cpp
+   NetworkCaptureLogger.h
+   PatchEngine.cpp
++  PorpoiseStall.cpp
++  PorpoiseStall.h
+   PatchEngine.h
+   PowerPC/BreakPoints.cpp
+   PowerPC/BreakPoints.h
 diff --git a/Source/Core/Core/Config/MainSettings.cpp b/Source/Core/Core/Config/MainSettings.cpp
 index f0cc8511b7..86571be24b 100644
 --- a/Source/Core/Core/Config/MainSettings.cpp
@@ -2207,27 +2284,28 @@ index f0c62d4e3f..bbb4cb7791 100644
  
    if (m_FileLoadedCb)
 diff --git a/Source/Core/Core/HLE/HLE.cpp b/Source/Core/Core/HLE/HLE.cpp
-index 31b6c2d1ed..e9d09a5296 100644
+index 31b6c2d1ed..53332767a6 100644
 --- a/Source/Core/Core/HLE/HLE.cpp
 +++ b/Source/Core/Core/HLE/HLE.cpp
-@@ -14,6 +14,7 @@
+@@ -14,6 +14,8 @@
  #include "Core/GeckoCode.h"
  #include "Core/HLE/HLE_Misc.h"
  #include "Core/HLE/HLE_OS.h"
++#include "Core/HLE/HLE_PorpoiseNative.h"
 +#include "Core/HLE/HLE_PorpoiseWidescreen.h"
  #include "Core/HW/Memmap.h"
  #include "Core/Host.h"
  #include "Core/PowerPC/PPCSymbolDB.h"
-@@ -26,7 +27,7 @@ namespace HLE
+@@ -26,7 +28,7 @@ namespace HLE
  static std::map<u32, u32> s_hooked_addresses;
  
  // clang-format off
 -constexpr std::array<Hook, 23> os_patches{{
-+constexpr std::array<Hook, 25> os_patches{{
++constexpr std::array<Hook, 29> os_patches{{
      // Placeholder, os_patches[0] is the "non-existent function" index
      {"FAKE_TO_SKIP_0",               HLE_Misc::UnimplementedFunction,       HookType::Replace, HookFlag::Generic},
  
-@@ -58,7 +59,11 @@ constexpr std::array<Hook, 23> os_patches{{
+@@ -58,7 +60,18 @@ constexpr std::array<Hook, 23> os_patches{{
  
      {"GeckoCodehandler",             HLE_Misc::GeckoCodeHandlerICacheFlush, HookType::Start,   HookFlag::Fixed},
      {"GeckoHandlerReturnTrampoline", HLE_Misc::GeckoReturnTrampoline,       HookType::Replace, HookFlag::Fixed},
@@ -2237,26 +2315,1007 @@ index 31b6c2d1ed..e9d09a5296 100644
 +    // Porpoise's universal widescreen (beta): installed at the addresses found when the game boots
 +    {"PorpoiseWidePerspective",      HLE_PorpoiseWidescreen::Perspective,   HookType::Start,   HookFlag::Fixed},
 +    {"PorpoiseWideFrustum",          HLE_PorpoiseWidescreen::Frustum,       HookType::Start,   HookFlag::Fixed},
++
++    // Porpoise's native routines: installed at the addresses found when the game boots
++    {"PorpoiseSkinAccumulate",       HLE_PorpoiseNative::SkinAccumulate,    HookType::Replace, HookFlag::Fixed},
++    {"PorpoiseSkinMorphAccumulate",  HLE_PorpoiseNative::SkinMorphAccumulate, HookType::Replace, HookFlag::Fixed},
++    {"PorpoiseOffsetShells",         HLE_PorpoiseNative::OffsetShells,      HookType::Replace, HookFlag::Fixed},
++    // Porpoise: the game's OSPanic message to the trace (found when the game boots)
++    {"PorpoisePanic",                HLE_OS::HLE_PorpoisePanic,             HookType::Start,   HookFlag::Fixed},
  }};
  // clang-format on
  
-@@ -104,6 +109,8 @@ void PatchFixedFunctions(Core::System& system)
+@@ -104,6 +117,9 @@ void PatchFixedFunctions(Core::System& system)
    // This has to always be installed even if cheats are not enabled because of the possibility of
    // loading a savestate where PC is inside the code handler while cheats are disabled.
    Patch(system, Gecko::HLE_TRAMPOLINE_ADDRESS, "GeckoHandlerReturnTrampoline");
 +  // Porpoise: the universal widescreen's hooks, when the game has them.
 +  HLE_PorpoiseWidescreen::Repatch(system);
++  HLE_PorpoiseNative::Repatch(system);
  }
  
  void PatchFunctions(Core::System& system)
-@@ -151,6 +158,7 @@ void PatchFunctions(Core::System& system)
+@@ -151,6 +167,8 @@ void PatchFunctions(Core::System& system)
  void Clear()
  {
    s_hooked_addresses.clear();
 +  HLE_PorpoiseWidescreen::Reset();
++  HLE_PorpoiseNative::Reset();
  }
  
  void Reload(Core::System& system)
+diff --git a/Source/Core/Core/HLE/HLE_OS.cpp b/Source/Core/Core/HLE/HLE_OS.cpp
+index 5aa5a905c6..5c749bef07 100644
+--- a/Source/Core/Core/HLE/HLE_OS.cpp
++++ b/Source/Core/Core/HLE/HLE_OS.cpp
+@@ -3,6 +3,8 @@
+ 
+ #include "Core/HLE/HLE_OS.h"
+ 
++#include <cstdio>
++
+ #include <cinttypes>
+ #include <memory>
+ #include <string>
+@@ -51,6 +53,22 @@ void HLE_OSPanic(const Core::CPUThreadGuard& guard)
+   ppc_state.npc = LR(ppc_state);
+ }
+ 
++void HLE_PorpoisePanic(const Core::CPUThreadGuard& guard)
++{
++  auto& system = guard.GetSystem();
++  const auto& ppc_state = system.GetPPCState();
++  const auto is_text = [&](u32 address) {
++    return PowerPC::MMU::HostIsRAMAddress(guard, address) &&
++           PowerPC::MMU::HostRead<u8>(guard, address) >= 0x20;
++  };
++  std::string file = is_text(ppc_state.gpr[3]) ? PowerPC::MMU::HostGetString(guard, ppc_state.gpr[3], 200) : "";
++  std::string msg = is_text(ppc_state.gpr[5]) ? GetStringVA(system, guard, 5) : "";
++  StringPopBackIf(&msg, '\n');
++  std::fprintf(stderr, "game: OSPanic from %08x: %s, line %d: %s\n", LR(ppc_state), file.c_str(),
++               static_cast<s32>(ppc_state.gpr[4]), msg.c_str());
++  std::fflush(stderr);
++}
++
+ // Generalized function for printing formatted string.
+ static void HLE_GeneralDebugPrint(const Core::CPUThreadGuard& guard, ParameterType parameter_type)
+ {
+diff --git a/Source/Core/Core/HLE/HLE_OS.h b/Source/Core/Core/HLE/HLE_OS.h
+index 4f7bcb8ed7..14f94f79ed 100644
+--- a/Source/Core/Core/HLE/HLE_OS.h
++++ b/Source/Core/Core/HLE/HLE_OS.h
+@@ -31,6 +31,9 @@ void HLE_GeneralDebugPrint(const Core::CPUThreadGuard& guard);
+ void HLE_GeneralDebugVPrint(const Core::CPUThreadGuard& guard);
+ void HLE_write_console(const Core::CPUThreadGuard& guard);
+ void HLE_OSPanic(const Core::CPUThreadGuard& guard);
++// Porpoise: at the start of the game's own OSPanic (found when it boots): its
++// file, line and message to the trace, and the game goes on to halt as it would.
++void HLE_PorpoisePanic(const Core::CPUThreadGuard& guard);
+ void HLE_LogDPrint(const Core::CPUThreadGuard& guard);
+ void HLE_LogVDPrint(const Core::CPUThreadGuard& guard);
+ void HLE_LogFPrint(const Core::CPUThreadGuard& guard);
+diff --git a/Source/Core/Core/HLE/HLE_PorpoiseNative.cpp b/Source/Core/Core/HLE/HLE_PorpoiseNative.cpp
+new file mode 100644
+index 0000000000..5152166347
+--- /dev/null
++++ b/Source/Core/Core/HLE/HLE_PorpoiseNative.cpp
+@@ -0,0 +1,870 @@
++// Porpoise's native routines.
++// Copyright (C) 2026 Ruben (Project Porpoise)
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "Core/HLE/HLE_PorpoiseNative.h"
++
++#include <algorithm>
++#include <atomic>
++#include <bit>
++#include <cstdio>
++#include <cstring>
++#include <iterator>
++#include <optional>
++#include <vector>
++
++#include <immintrin.h>
++
++#include "Common/CPUDetect.h"
++#include "Common/CommonTypes.h"
++#include "Common/Config/Config.h"
++#include "Common/Logging/Log.h"
++#include "Common/Swap.h"
++#include "Core/Config/MainSettings.h"
++#include "Core/Config/SessionSettings.h"
++#include "Core/Core.h"
++#include "Core/HLE/HLE.h"
++#include "Core/HW/Memmap.h"
++#include "Core/PowerPC/MMU.h"
++#include "Core/PowerPC/PowerPC.h"
++#include "Core/System.h"
++#include "DiscIO/DiscUtils.h"
++#include "DiscIO/Volume.h"
++#include "DiscIO/VolumeDisc.h"
++
++// Every multiply and add below rounds on its own, as the game's instructions do
++// under the JIT: none may be fused into another.
++#ifdef __clang__
++#pragma clang fp contract(off)
++#define PORPOISE_FMA __attribute__((target("fma")))
++#define PORPOISE_AVX __attribute__((target("avx,fma")))
++#else
++#define PORPOISE_FMA
++#define PORPOISE_AVX
++#endif
++
++namespace HLE_PorpoiseNative
++{
++namespace
++{
++// Punch-Out!! (R7PE01, 801c0be0): skinning. For each vertex, its position and
++// normal through up to four weighted bone matrices (4x4, column-major, 64
++// bytes), summed into the output arrays.
++//   r3 vertices, r4 matrices, r5 24-byte weight records (four weights, four
++//   bone indices, a count), r6/r7 positions in/out, r9/r10 normals in/out
++constexpr u32 kSkinAccumulate[] = {
++    0x9421FFF0, 0x39800000, 0xC1A29EA8, 0x93E1000C, 0x48000104, 0xD1A70000,
++    0x7CAB2B78, 0x88050014, 0x3BE00000, 0xD1A70004, 0xD1A70008, 0xD1AA0000,
++    0xD1AA0004, 0xD1AA0008, 0x7C0903A6, 0x28000000, 0x408100BC, 0x7D05FA14,
++    0xC18B0000, 0x88080010, 0x396B0004, 0xE0060000, 0x3BFF0001, 0x54003032,
++    0xE0268008, 0x7D040214, 0xE0480000, 0xE0680008, 0x11420018, 0xE0880010,
++    0x11630018, 0xE0A80018, 0xE0C80020, 0x1144501E, 0x1165581E, 0xE0E80028,
++    0xE1080030, 0x1146505C, 0xE1280038, 0x1167585C, 0xE0070000, 0x1148502A,
++    0xE0278008, 0x1169582A, 0x114A031C, 0xE0090000, 0x116B0B1C, 0xE0298008,
++    0xF1470000, 0x11420018, 0xF1678008, 0x11630018, 0x1144501E, 0x1165581E,
++    0xE00A0000, 0x1146505C, 0x1167585C, 0xE02A8008, 0x114A031C, 0x116B0B1C,
++    0xF14A0000, 0xF16A8008, 0x4200FF4C, 0x38A50018, 0x38C6000C, 0x38E7000C,
++    0x3929000C, 0x394A000C, 0x398C0001, 0x7C0C1800, 0x4180FEFC, 0x83E1000C,
++    0x38210010, 0x4E800020,
++};
++
++// Punch-Out!! (801c108c): the same, the position first moved by a per-vertex
++// offset (a morph), r8.
++constexpr u32 kSkinMorphAccumulate[] = {
++    0x9421FFF0, 0xC1A29EA8, 0x93E1000C, 0x3BE00000, 0x93C10008, 0x48000118,
++    0xD1A70000, 0x7CAC2B78, 0x88050014, 0x3BC00000, 0xD1A70004, 0xD1A70008,
++    0xD1AA0000, 0xD1AA0004, 0xD1AA0008, 0x7C0903A6, 0x28000000, 0x408100CC,
++    0x7D65F214, 0xC18C0000, 0x880B0010, 0x398C0004, 0xE0060000, 0x3BDE0001,
++    0xE1480000, 0x54003032, 0x7D640214, 0xE0268008, 0x1000502A, 0xE04B0000,
++    0xE1688008, 0xE06B0008, 0x11420018, 0xE08B0010, 0x1021582A, 0xE0AB0018,
++    0x11630018, 0xE0CB0020, 0x1144501E, 0xE0EB0028, 0x1165581E, 0xE10B0030,
++    0xE12B0038, 0x1146505C, 0x1167585C, 0xE0070000, 0xE0278008, 0x1148502A,
++    0x1169582A, 0x114A031C, 0xE0090000, 0x116B0B1C, 0xE0298008, 0xF1470000,
++    0x11420018, 0xF1678008, 0x11630018, 0x1144501E, 0x1165581E, 0xE00A0000,
++    0x1146505C, 0x1167585C, 0xE02A8008, 0x114A031C, 0x116B0B1C, 0xF14A0000,
++    0xF16A8008, 0x4200FF3C, 0x38A50018, 0x38C6000C, 0x38E7000C, 0x3908000C,
++    0x3929000C, 0x394A000C, 0x3BFF0001, 0x7C1F1800, 0x4180FEE8, 0x83E1000C,
++    0x83C10008, 0x38210010, 0x4E800020,
++};
++
++// Punch-Out!! (8011eb44, inside a larger function): three copies of each
++// vertex pushed out along its normal, by a per-vertex byte times a scale (the
++// boxers' outlines), in the locked cache. The loop only, from its mtctr to its
++// bdnz; it continues at the instruction after.
++constexpr u32 kOffsetShells[] = {
++    0x7C6903A6, 0x40810090, 0x88690003, 0x39290004, 0x93E10050, 0xC3AF0000,
++    0x90610054, 0xE0080000, 0xC9A10050, 0xE0288008, 0x3908000C, 0xEDADF828,
++    0xE0470000, 0xE0678008, 0x38E7000C, 0xC3CF0004, 0xEF7C0372, 0xC1AF0008,
++    0xEC9D06F2, 0xECBE06F2, 0xECCD06F2, 0x10E0111C, 0x1101191C, 0x1120115C,
++    0xF0E50000, 0x1141195C, 0x1160119C, 0xF1058008, 0x1181199C, 0x38A5000C,
++    0xF1260000, 0xF1468008, 0x38C6000C, 0xF1640000, 0xF1848008, 0x3884000C,
++    0x4200FF78,
++};
++
++// Words whose 16-bit displacement may differ from one build of the game to
++// another (another region's constants, or its stack frame laid out otherwise):
++// only their upper half has to match, and the routine uses the game's own
++// displacement. -1 ends the list.
++struct Routine
++{
++  const char* hook;
++  const char* what;
++  const u32* words;
++  u32 count;
++  int free[3];
++};
++
++constexpr Routine kRoutines[] = {
++    // lfs f13, d(rtoc)
++    {"PorpoiseSkinAccumulate", "skinning", kSkinAccumulate, u32(std::size(kSkinAccumulate)),
++     {2, -1, -1}},
++    {"PorpoiseSkinMorphAccumulate", "morph skinning", kSkinMorphAccumulate,
++     u32(std::size(kSkinMorphAccumulate)), {1, -1, -1}},
++    // stw r31, d(sp); stw r3, d+4(sp); lfd f13, d(sp)
++    {"PorpoiseOffsetShells", "outline shells", kOffsetShells, u32(std::size(kOffsetShells)),
++     {4, 6, 8}},
++};
++
++struct Match
++{
++  u32 address;
++  s16 displacement[3];
++};
++
++struct Hooked
++{
++  u32 address;
++  const char* hook;
++};
++std::vector<Hooked> s_hooked;
++// Where the outline loop continues (it is hooked in the middle of a function).
++u32 s_shells_end = 0;
++// The displacements of the build found: the clearing constant's from rtoc (for
++// each skinning routine), and the outline loop's scratch doubleword on the stack.
++s32 s_clear_at[2] = {-0x6158, -0x6158};
++s32 s_shells_scratch = 0x50;
++std::atomic<bool> s_logged[std::size(kRoutines)];
++// The two-vertex path needs AVX (the PS5 has it; checked anyway).
++bool s_avx = false;
++
++struct Section
++{
++  u32 start;
++  u32 end;  // exclusive
++};
++
++std::vector<Section> TextSections(const DiscIO::VolumeDisc& volume)
++{
++  std::vector<Section> sections;
++  const DiscIO::Partition partition = volume.GetGamePartition();
++  const std::optional<u64> dol = DiscIO::GetBootDOLOffset(volume, partition);
++  if (!dol)
++    return sections;
++  for (u32 i = 0; i < 7; ++i)
++  {
++    const std::optional<u32> address = volume.ReadSwapped<u32>(*dol + 0x48 + i * 4, partition);
++    const std::optional<u32> size = volume.ReadSwapped<u32>(*dol + 0x90 + i * 4, partition);
++    if (!address || !size || *size == 0 || *size > 0x01800000)
++      continue;
++    if (*address < 0x80000000 || *address >= 0x81800000)
++      continue;
++    sections.push_back({*address, *address + (*size & ~3u)});
++  }
++  return sections;
++}
++
++bool IsFree(const Routine& routine, u32 i)
++{
++  for (const int f : routine.free)
++    if (f >= 0 && u32(f) == i)
++      return true;
++  return false;
++}
++
++std::vector<Match> Find(const Core::CPUThreadGuard& guard, const std::vector<Section>& sections,
++                        const Routine& routine)
++{
++  std::vector<Match> found;
++  for (const Section& section : sections)
++  {
++    for (u32 address = section.start; address + routine.count * 4 <= section.end; address += 4)
++    {
++      if (PowerPC::MMU::HostRead_Instruction(guard, address) != routine.words[0])
++        continue;
++      u32 i = 1;
++      for (; i < routine.count; ++i)
++      {
++        const u32 word = PowerPC::MMU::HostRead_Instruction(guard, address + i * 4);
++        const u32 mask = IsFree(routine, i) ? 0xFFFF0000u : 0xFFFFFFFFu;
++        if ((word & mask) != (routine.words[i] & mask))
++          break;
++      }
++      if (i != routine.count)
++        continue;
++      Match match{address, {0, 0, 0}};
++      for (int k = 0; k < 3; ++k)
++        if (routine.free[k] >= 0)
++          match.displacement[k] =
++              s16(PowerPC::MMU::HostRead_Instruction(guard, address + u32(routine.free[k]) * 4));
++      found.push_back(match);
++    }
++  }
++  return found;
++}
++
++void LogFirst(std::size_t routine)
++{
++  if (!s_logged[routine].exchange(true))
++    std::fprintf(stderr, "native: %s running natively\n", kRoutines[routine].what);
++}
++
++// The game's memory. Fast: host pointers, for ranges already known to be plain
++// RAM (the locked cache, or BAT-mapped memory in the fastmem arena, as the
++// JIT's own fastmem accesses use). Slow: the MMU, for anything else.
++struct Fast
++{
++  u8* base;
++  u8* l1;
++  u8* At(u32 ea) const { return (ea >> 28) == 0xE ? l1 + (ea - 0xE0000000u) : base + ea; }
++  u8 R8(u32 ea) const { return *At(ea); }
++  u32 R32(u32 ea) const
++  {
++    u32 v;
++    std::memcpy(&v, At(ea), 4);
++    return Common::swap32(v);
++  }
++  void W32(u32 ea, u32 v) const
++  {
++    v = Common::swap32(v);
++    std::memcpy(At(ea), &v, 4);
++  }
++  // Two big-endian singles (psq_l, W=0), as doubles: the first in the low lane.
++  PORPOISE_FMA __m128d Pair(u32 ea) const
++  {
++    u64 v;
++    std::memcpy(&v, At(ea), 8);
++    v = std::rotl(__builtin_bswap64(v), 32);
++    return _mm_cvtps_pd(_mm_castsi128_ps(_mm_cvtsi64_si128(s64(v))));
++  }
++  // psq_st, W=0.
++  PORPOISE_FMA void StorePair(u32 ea, __m128d v) const
++  {
++    const u64 bits = u64(_mm_cvtsi128_si64(_mm_castps_si128(_mm_cvtpd_ps(v))));
++    const u64 out = __builtin_bswap64(std::rotl(bits, 32));
++    std::memcpy(At(ea), &out, 8);
++  }
++};
++
++struct Slow
++{
++  PowerPC::MMU& mmu;
++  u8 R8(u32 ea) const { return mmu.Read<u8>(ea); }
++  u32 R32(u32 ea) const { return mmu.Read<u32>(ea); }
++  void W32(u32 ea, u32 v) const { mmu.Write<u32>(v, ea); }
++  PORPOISE_FMA __m128d Pair(u32 ea) const
++  {
++    const float lo = std::bit_cast<float>(R32(ea));
++    const float hi = std::bit_cast<float>(R32(ea + 4));
++    return _mm_set_pd(double(hi), double(lo));
++  }
++  PORPOISE_FMA void StorePair(u32 ea, __m128d v) const
++  {
++    alignas(16) float f[4];
++    _mm_store_ps(f, _mm_cvtpd_ps(v));
++    W32(ea, std::bit_cast<u32>(f[0]));
++    W32(ea + 4, std::bit_cast<u32>(f[1]));
++  }
++};
++
++bool Plain(Core::System& system, u32 ea, u64 bytes)
++{
++  if (bytes == 0)
++    return true;
++  const u64 end = u64(ea) + bytes;
++  if (end > 0x1'0000'0000ull)
++    return false;
++  auto& memory = system.GetMemory();
++  if ((ea >> 28) == 0xE || ((end - 1) >> 28) == 0xE)
++  {
++    return memory.GetL1Cache() && ea >= 0xE0000000u &&
++           end <= 0xE0000000ull + memory.GetL1CacheSize();
++  }
++  if (!memory.GetLogicalBase())
++    return false;
++  auto& mmu = system.GetMMU();
++  for (u64 page = ea & ~u64(PowerPC::BAT_PAGE_SIZE - 1); page < end; page += PowerPC::BAT_PAGE_SIZE)
++  {
++    if (!mmu.IsOptimizableRAMAddress(u32(std::max<u64>(page, ea)), 8))
++      return false;
++  }
++  return true;
++}
++
++Fast FastOf(Core::System& system)
++{
++  return {system.GetMemory().GetLogicalBase(), system.GetMemory().GetL1Cache()};
++}
++
++float F(u32 bits)
++{
++  return std::bit_cast<float>(bits);
++}
++
++u32 B(float value)
++{
++  return std::bit_cast<u32>(value);
++}
++
++// The JIT's paired-single arithmetic on single-precision values, each step
++// rounded to single as it is there (accurate single precision, the default):
++// a multiply or an add in double rounded to single is the same as one in
++// single (the double result is exact, or rounds the same way); a multiply-add
++// is fused in double, then rounded to single (Dolphin's FMA path, without
++// "Exact Multiply-Add").
++PORPOISE_FMA inline float Madd(float a, float c, float b)
++{
++  return float(__builtin_fma(double(a), double(c), double(b)));
++}
++
++// The same on a pair of lanes held as doubles (as the JIT holds paired singles):
++// each step in double, then rounded to single and back.
++PORPOISE_FMA inline __m128d Round(__m128d v)
++{
++  return _mm_cvtps_pd(_mm_cvtpd_ps(v));
++}
++PORPOISE_FMA inline double Round(double v)
++{
++  return double(float(v));
++}
++PORPOISE_FMA inline __m128d Dup(double v)
++{
++  return _mm_set1_pd(v);
++}
++
++u32 Compare(s32 a, s32 b, u32 so)
++{
++  return (a < b ? 8u : a > b ? 4u : 2u) | so;
++}
++
++template <bool Morph, class M>
++PORPOISE_FMA void Skin(const M& m, PowerPC::PowerPCState& s, s32 clear_at)
++{
++  u32* const g = s.gpr;
++  const u32 n = g[3], mats = g[4];
++  u32 r0 = g[0], r5 = g[5], r6 = g[6], r7 = g[7], r8 = g[8], r9 = g[9], r10 = g[10];
++  u32 r11 = g[11], r12 = g[12], r30 = g[30], r31 = g[31];
++  u32 ctr = CTR(s);
++
++  // Prologue: stwu sp, -16(sp); lfs f13, clear_at(rtoc); stw r31 (and r30).
++  u32 sp = g[1];
++  m.W32(sp - 16, sp);
++  sp -= 16;
++  const u32 clear = m.R32(g[2] + u32(clear_at));
++  m.W32(sp + 0xC, r31);
++  // The vertex counter: r12 (skinning) or r31 (morph); the weight pointer: r11
++  // or r12; the bone counter: r31 or r30; the record and matrix pointer: r8 or r11.
++  u32& vertex = Morph ? r31 : r12;
++  u32& weights = Morph ? r12 : r11;
++  u32& bone = Morph ? r30 : r31;
++  u32& scratch = Morph ? r11 : r8;
++  vertex = 0;
++  if (Morph)
++    m.W32(sp + 8, r30);
++
++  while (s32(vertex) < s32(n))
++  {
++    m.W32(r7, clear);
++    weights = r5;
++    r0 = m.R8(r5 + 0x14);
++    bone = 0;
++    m.W32(r7 + 4, clear);
++    m.W32(r7 + 8, clear);
++    m.W32(r10, clear);
++    m.W32(r10 + 4, clear);
++    m.W32(r10 + 8, clear);
++    ctr = r0;
++    if (r0 != 0)
++    {
++      do
++      {
++        // Every load of the bone comes before its first store, as in the game.
++        scratch = r5 + bone;
++        const float w = F(m.R32(weights));
++        r0 = m.R8(scratch + 0x10);
++        weights += 4;
++        float x = F(m.R32(r6));
++        float y = F(m.R32(r6 + 4));
++        float z = F(m.R32(r6 + 8));
++        bone += 1;
++        if constexpr (Morph)
++        {
++          x = x + F(m.R32(r8));
++          y = y + F(m.R32(r8 + 4));
++          z = z + F(m.R32(r8 + 8));
++        }
++        r0 = std::rotl(r0, 6) & 0xFFFFFFC0u;
++        scratch = mats + r0;
++        const u32 mx = scratch;
++        // The matrix's columns: (0,1) and 2, (4,5) and 6, (8,9) and 10, (12,13) and 14.
++        const __m128d c01 = m.Pair(mx), c45 = m.Pair(mx + 0x10), c89 = m.Pair(mx + 0x20),
++                      cCD = m.Pair(mx + 0x30);
++        const double c2 = double(F(m.R32(mx + 0x08))), c6 = double(F(m.R32(mx + 0x18))),
++                     cA = double(F(m.R32(mx + 0x28))), cE = double(F(m.R32(mx + 0x38)));
++        const double dx = double(x), dy = double(y), dz = double(z), dw = double(w);
++
++        // Position: the matrix times (x, y, z, 1), times the weight, plus the sum so far.
++        __m128d p = Round(_mm_mul_pd(c01, Dup(dx)));
++        double pz = Round(c2 * dx);
++        p = Round(_mm_fmadd_pd(c45, Dup(dy), p));
++        pz = Round(__builtin_fma(c6, dy, pz));
++        p = Round(_mm_fmadd_pd(c89, Dup(dz), p));
++        pz = Round(__builtin_fma(cA, dz, pz));
++        const __m128d o = m.Pair(r7);
++        const double oz = double(F(m.R32(r7 + 8)));
++        p = Round(_mm_add_pd(cCD, p));
++        pz = Round(cE + pz);
++        p = Round(_mm_fmadd_pd(p, Dup(dw), o));
++        pz = Round(__builtin_fma(pz, dw, oz));
++        const __m128d nxy = m.Pair(r9);
++        const double nz = double(F(m.R32(r9 + 8)));
++        m.StorePair(r7, p);
++        m.W32(r7 + 8, B(float(pz)));
++
++        // Normal: the matrix's 3x3 times it, times the weight, plus the sum so far.
++        const double nx = _mm_cvtsd_f64(nxy), ny = _mm_cvtsd_f64(_mm_unpackhi_pd(nxy, nxy));
++        __m128d q = Round(_mm_mul_pd(c01, Dup(nx)));
++        double qz = Round(c2 * nx);
++        q = Round(_mm_fmadd_pd(c45, Dup(ny), q));
++        qz = Round(__builtin_fma(c6, ny, qz));
++        const __m128d so = m.Pair(r10);
++        const double sz = double(F(m.R32(r10 + 8)));
++        q = Round(_mm_fmadd_pd(c89, Dup(nz), q));
++        qz = Round(__builtin_fma(cA, nz, qz));
++        q = Round(_mm_fmadd_pd(q, Dup(dw), so));
++        qz = Round(__builtin_fma(qz, dw, sz));
++        m.StorePair(r10, q);
++        m.W32(r10 + 8, B(float(qz)));
++      } while (--ctr != 0);
++    }
++    r5 += 24;
++    r6 += 12;
++    r7 += 12;
++    if constexpr (Morph)
++      r8 += 12;
++    r9 += 12;
++    r10 += 12;
++    vertex += 1;
++  }
++
++  // cmpw vertex, r3; the epilogue: lwz r31 (and r30); addi sp, sp, 16; blr.
++  s.cr.SetField(0, Compare(s32(vertex), s32(n), s.GetXER_SO()));
++  r31 = m.R32(sp + 0xC);
++  if (Morph)
++    r30 = m.R32(sp + 8);
++  g[1] = sp + 16;
++  g[0] = r0;
++  g[5] = r5;
++  g[6] = r6;
++  g[7] = r7;
++  g[8] = r8;
++  g[9] = r9;
++  g[10] = r10;
++  g[11] = r11;
++  g[12] = r12;
++  g[30] = r30;
++  g[31] = r31;
++  CTR(s) = ctr;
++  s.npc = LR(s);
++}
++
++// Two vertices at once, in the lanes of 256-bit registers, for a call whose
++// output arrays overlap nothing it reads (Disjoint): then the order of its loads
++// and stores can't matter, and each vertex's sums stay in registers. Every
++// lane's arithmetic is the scalar routine's, step for step.
++PORPOISE_AVX inline __m256d Round(__m256d v)
++{
++  return _mm256_cvtps_pd(_mm256_cvtpd_ps(v));
++}
++
++PORPOISE_AVX inline __m256d Pair2(const Fast& m, u32 ea0, u32 ea1)
++{
++  return _mm256_set_m128d(m.Pair(ea1), m.Pair(ea0));
++}
++
++PORPOISE_AVX inline __m128d Single2(const Fast& m, u32 ea0, u32 ea1)
++{
++  return _mm_set_pd(double(F(m.R32(ea1))), double(F(m.R32(ea0))));
++}
++
++PORPOISE_AVX inline __m256d Spread(__m128d v)
++{
++  // (a, b) -> (a, a, b, b)
++  return _mm256_set_m128d(_mm_unpackhi_pd(v, v), _mm_unpacklo_pd(v, v));
++}
++
++template <bool Morph>
++PORPOISE_AVX void SkinBatch(const Fast& m, PowerPC::PowerPCState& s, s32 clear_at)
++{
++  u32* const g = s.gpr;
++  const u32 n = g[3], mats = g[4], r5 = g[5], r6 = g[6], r7 = g[7], r8 = g[8], r9 = g[9],
++            r10 = g[10];
++  u32 r31 = g[31], r30 = g[30];
++
++  u32 sp = g[1];
++  m.W32(sp - 16, sp);
++  sp -= 16;
++  const u32 clear = m.R32(g[2] + u32(clear_at));
++  m.W32(sp + 0xC, r31);
++  if (Morph)
++    m.W32(sp + 8, r30);
++  const double clear_d = double(F(clear));
++
++  for (u32 v = 0; v < n; v += 2)
++  {
++    const bool two = v + 1 < n;
++    const u32 v1 = two ? v + 1 : v;
++    const u32 rec0 = r5 + v * 24, rec1 = r5 + v1 * 24;
++    const u32 k0 = m.R8(rec0 + 0x14), k1 = two ? m.R8(rec1 + 0x14) : 0;
++    const u32 in0 = r6 + v * 12, in1 = r6 + v1 * 12;
++    __m128d xz = Single2(m, in0, in1);  // x of each vertex
++    __m128d yz = Single2(m, in0 + 4, in1 + 4);
++    __m128d zz = Single2(m, in0 + 8, in1 + 8);
++    if constexpr (Morph)
++    {
++      // Single adds: the same as the JIT's double add rounded to single.
++      const u32 d0 = r8 + v * 12, d1 = r8 + v1 * 12;
++      xz = Round(_mm_add_pd(xz, Single2(m, d0, d1)));
++      yz = Round(_mm_add_pd(yz, Single2(m, d0 + 4, d1 + 4)));
++      zz = Round(_mm_add_pd(zz, Single2(m, d0 + 8, d1 + 8)));
++    }
++    const __m256d X = Spread(xz), Y = Spread(yz), Z = Spread(zz);
++    const u32 n0 = r9 + v * 12, n1 = r9 + v1 * 12;
++    const __m128d nxz = Single2(m, n0, n1), nyz = Single2(m, n0 + 4, n1 + 4),
++                  nzz = Single2(m, n0 + 8, n1 + 8);
++    const __m256d NX = Spread(nxz), NY = Spread(nyz);
++
++    __m256d P = _mm256_set1_pd(clear_d), Q = P;
++    __m128d Pz = _mm_set1_pd(clear_d), Qz = Pz;
++    const u32 k = std::max(k0, k1);
++    for (u32 j = 0; j < k; ++j)
++    {
++      const u32 i0 = m.R8(rec0 + 0x10 + j), i1 = m.R8(rec1 + 0x10 + j);
++      const u32 m0 = mats + (i0 << 6), m1 = mats + (i1 << 6);
++      const __m128d wz = Single2(m, rec0 + j * 4, rec1 + j * 4);
++      const __m256d W = Spread(wz);
++      const __m256d c01 = Pair2(m, m0, m1), c45 = Pair2(m, m0 + 0x10, m1 + 0x10),
++                    c89 = Pair2(m, m0 + 0x20, m1 + 0x20), cCD = Pair2(m, m0 + 0x30, m1 + 0x30);
++      const __m128d c2 = Single2(m, m0 + 0x08, m1 + 0x08), c6 = Single2(m, m0 + 0x18, m1 + 0x18),
++                    cA = Single2(m, m0 + 0x28, m1 + 0x28), cE = Single2(m, m0 + 0x38, m1 + 0x38);
++      const __m256d on = _mm256_castsi256_pd(_mm256_set_epi64x(
++          j < k1 ? -1 : 0, j < k1 ? -1 : 0, j < k0 ? -1 : 0, j < k0 ? -1 : 0));
++      const __m128d onz = _mm_castsi128_pd(_mm_set_epi64x(j < k1 ? -1 : 0, j < k0 ? -1 : 0));
++
++      __m256d p = Round(_mm256_mul_pd(c01, X));
++      __m128d pz = Round(_mm_mul_pd(c2, xz));
++      p = Round(_mm256_fmadd_pd(c45, Y, p));
++      pz = Round(_mm_fmadd_pd(c6, yz, pz));
++      p = Round(_mm256_fmadd_pd(c89, Z, p));
++      pz = Round(_mm_fmadd_pd(cA, zz, pz));
++      p = Round(_mm256_add_pd(cCD, p));
++      pz = Round(_mm_add_pd(cE, pz));
++      P = _mm256_blendv_pd(P, Round(_mm256_fmadd_pd(p, W, P)), on);
++      Pz = _mm_blendv_pd(Pz, Round(_mm_fmadd_pd(pz, wz, Pz)), onz);
++
++      __m256d q = Round(_mm256_mul_pd(c01, NX));
++      __m128d qz = Round(_mm_mul_pd(c2, nxz));
++      q = Round(_mm256_fmadd_pd(c45, NY, q));
++      qz = Round(_mm_fmadd_pd(c6, nyz, qz));
++      q = Round(_mm256_fmadd_pd(c89, Spread(nzz), q));
++      qz = Round(_mm_fmadd_pd(cA, nzz, qz));
++      Q = _mm256_blendv_pd(Q, Round(_mm256_fmadd_pd(q, W, Q)), on);
++      Qz = _mm_blendv_pd(Qz, Round(_mm_fmadd_pd(qz, wz, Qz)), onz);
++    }
++
++    // A vertex with no bones keeps the stfs'd words as they were.
++    const auto put = [&](u32 out, u32 bones, __m128d xy, double z) {
++      if (bones == 0)
++      {
++        m.W32(out, clear);
++        m.W32(out + 4, clear);
++        m.W32(out + 8, clear);
++        return;
++      }
++      m.StorePair(out, xy);
++      m.W32(out + 8, B(float(z)));
++    };
++    put(r7 + v * 12, k0, _mm256_castpd256_pd128(P), _mm_cvtsd_f64(Pz));
++    put(r10 + v * 12, k0, _mm256_castpd256_pd128(Q), _mm_cvtsd_f64(Qz));
++    if (two)
++    {
++      put(r7 + v1 * 12, k1, _mm256_extractf128_pd(P, 1), _mm_cvtsd_f64(_mm_unpackhi_pd(Pz, Pz)));
++      put(r10 + v1 * 12, k1, _mm256_extractf128_pd(Q, 1), _mm_cvtsd_f64(_mm_unpackhi_pd(Qz, Qz)));
++    }
++  }
++
++  // The registers as the scalar routine leaves them (n > 0 here).
++  const u32 last = r5 + (n - 1) * 24;
++  const u32 k_last = m.R8(last + 0x14);
++  u32 r0 = k_last ? (u32(m.R8(last + 0x10 + k_last - 1)) << 6) : 0;
++  u32 scratch = Morph ? g[11] : g[8];
++  for (u32 v = n; v-- > 0;)
++  {
++    const u32 rec = r5 + v * 24;
++    const u32 kv = m.R8(rec + 0x14);
++    if (kv)
++    {
++      scratch = mats + (u32(m.R8(rec + 0x10 + kv - 1)) << 6);
++      break;
++    }
++  }
++  const u32 weights = last + k_last * 4;
++  s.cr.SetField(0, Compare(s32(n), s32(n), s.GetXER_SO()));
++  r31 = m.R32(sp + 0xC);
++  if (Morph)
++    r30 = m.R32(sp + 8);
++  g[1] = sp + 16;
++  g[0] = r0;
++  g[5] = r5 + n * 24;
++  g[6] = r6 + n * 12;
++  g[7] = r7 + n * 12;
++  g[8] = Morph ? r8 + n * 12 : scratch;
++  g[9] = r9 + n * 12;
++  g[10] = r10 + n * 12;
++  if (Morph)
++  {
++    g[11] = scratch;
++    g[12] = weights;
++    g[30] = r30;
++    g[31] = r31;
++  }
++  else
++  {
++    g[11] = weights;
++    g[12] = n;
++    g[31] = r31;
++  }
++  CTR(s) = 0;
++  s.npc = LR(s);
++}
++
++bool Disjoint(u32 a, u64 a_bytes, u32 b, u64 b_bytes)
++{
++  return u64(a) + a_bytes <= b || u64(b) + b_bytes <= a;
++}
++
++template <class M>
++PORPOISE_FMA void Shells(const M& m, PowerPC::PowerPCState& s, u32 end, s32 scratch)
++{
++  u32* const g = s.gpr;
++  u32 r3 = g[3], r4 = g[4], r5 = g[5], r6 = g[6], r7 = g[7], r8 = g[8], r9 = g[9];
++  const u32 r15 = g[15], r31 = g[31], sp = g[1];
++
++  // mtctr r3. Only reached past "cmpwi r3, 0; ble-", so r3 is above 0 and the
++  // second ble- isn't taken.
++  CTR(s) = r3;
++
++  const double f28 = s.ps[28].PS0AsDouble();
++  const double f31 = s.ps[31].PS0AsDouble();
++  u32 ctr = r3;
++  float f4 = 0, f5 = 0, f6 = 0, f13 = 0, f27 = 0, f29 = 0, f30 = 0;
++  do
++  {
++    r3 = m.R8(r9 + 3);
++    r9 += 4;
++    m.W32(sp + u32(scratch), r31);
++    f29 = F(m.R32(r15));
++    m.W32(sp + u32(scratch) + 4, r3);
++    const float p0x = F(m.R32(r8)), p0y = F(m.R32(r8 + 4)), p1x = F(m.R32(r8 + 8));
++    // lfd f13, scratch(sp); fsubs f13, f13, f31: the byte, through the 2^52 trick.
++    const u64 bits = (u64(m.R32(sp + u32(scratch))) << 32) | m.R32(sp + u32(scratch) + 4);
++    r8 += 12;
++    const float byte = float(std::bit_cast<double>(bits) - f31);
++    const float p2x = F(m.R32(r7)), p2y = F(m.R32(r7 + 4)), p3x = F(m.R32(r7 + 8));
++    r7 += 12;
++    f30 = F(m.R32(r15 + 4));
++    f27 = float(f28 * double(byte));
++    f13 = F(m.R32(r15 + 8));
++    f4 = f29 * f27;
++    f5 = f30 * f27;
++    f6 = f13 * f27;
++    const float p7x = Madd(p0x, f4, p2x), p7y = Madd(p0y, f4, p2y), p8 = Madd(p1x, f4, p3x);
++    const float p9x = Madd(p0x, f5, p2x), p9y = Madd(p0y, f5, p2y), p10 = Madd(p1x, f5, p3x);
++    const float p11x = Madd(p0x, f6, p2x), p11y = Madd(p0y, f6, p2y), p12 = Madd(p1x, f6, p3x);
++    m.W32(r5, B(p7x));
++    m.W32(r5 + 4, B(p7y));
++    m.W32(r5 + 8, B(p8));
++    r5 += 12;
++    m.W32(r6, B(p9x));
++    m.W32(r6 + 4, B(p9y));
++    m.W32(r6 + 8, B(p10));
++    r6 += 12;
++    m.W32(r4, B(p11x));
++    m.W32(r4 + 4, B(p11y));
++    m.W32(r4 + 8, B(p12));
++    r4 += 12;
++  } while (--ctr != 0);
++
++  g[3] = r3;
++  g[4] = r4;
++  g[5] = r5;
++  g[6] = r6;
++  g[7] = r7;
++  g[8] = r8;
++  g[9] = r9;
++  CTR(s) = 0;
++  // The scalar results, in both halves as the console leaves them.
++  s.ps[4].Fill(double(f4));
++  s.ps[5].Fill(double(f5));
++  s.ps[6].Fill(double(f6));
++  s.ps[13].Fill(double(f13));
++  s.ps[27].Fill(double(f27));
++  s.ps[29].Fill(double(f29));
++  s.ps[30].Fill(double(f30));
++  s.npc = end;
++}
++
++template <bool Morph>
++void RunSkin(const Core::CPUThreadGuard& guard, std::size_t routine)
++{
++  LogFirst(routine);
++  Core::System& system = guard.GetSystem();
++  PowerPC::PowerPCState& s = system.GetPPCState();
++  const u32* const g = s.gpr;
++  const s32 clear_at = s_clear_at[Morph ? 1 : 0];
++  const u64 count = s32(g[3]) > 0 ? g[3] : 0;
++  const bool fast =
++      Plain(system, g[1] - 16, 16) && Plain(system, g[2] + u32(clear_at), 4) &&
++      (count == 0 ||
++       (Plain(system, g[4], 256 * 64) && Plain(system, g[5], count * 24 + 0x10 + 256) &&
++        Plain(system, g[6], count * 12) && Plain(system, g[7], count * 12) &&
++        (!Morph || Plain(system, g[8], count * 12)) && Plain(system, g[9], count * 12) &&
++        Plain(system, g[10], count * 12)));
++  if (fast && count > 0 && s_avx)
++  {
++    // The outputs overlap nothing read: the stack frame, the constant, the
++    // matrices, the records, the inputs, or each other.
++    const u64 out = count * 12;
++    const u32 o1 = g[7], o2 = g[10];
++    bool apart = Disjoint(o1, out, o2, out);
++    for (const u32 o : {o1, o2})
++    {
++      apart = apart && Disjoint(o, out, g[1] - 16, 16) && Disjoint(o, out, g[2] + u32(clear_at), 4) &&
++              Disjoint(o, out, g[4], 256 * 64) && Disjoint(o, out, g[5], count * 24 + 0x10 + 256) &&
++              Disjoint(o, out, g[6], count * 12) && Disjoint(o, out, g[9], count * 12) &&
++              (!Morph || Disjoint(o, out, g[8], count * 12));
++    }
++    if (apart)
++    {
++      SkinBatch<Morph>(FastOf(system), s, clear_at);
++      return;
++    }
++  }
++  if (fast)
++    Skin<Morph>(FastOf(system), s, clear_at);
++  else
++    Skin<Morph>(Slow{system.GetMMU()}, s, clear_at);
++}
++}  // namespace
++
++void SkinAccumulate(const Core::CPUThreadGuard& guard)
++{
++  RunSkin<false>(guard, 0);
++}
++
++void SkinMorphAccumulate(const Core::CPUThreadGuard& guard)
++{
++  RunSkin<true>(guard, 1);
++}
++
++void OffsetShells(const Core::CPUThreadGuard& guard)
++{
++  LogFirst(2);
++  Core::System& system = guard.GetSystem();
++  PowerPC::PowerPCState& s = system.GetPPCState();
++  const u32* const g = s.gpr;
++  if (s32(g[3]) <= 0)
++  {
++    // Not reached from the game's own code (see Shells); as its ble- would.
++    CTR(s) = g[3];
++    s.npc = s_shells_end;
++    return;
++  }
++  const u64 count = g[3];
++  const bool fast = Plain(system, g[1] + u32(s_shells_scratch), 8) && Plain(system, g[15], 12) &&
++                    Plain(system, g[9], count * 4) && Plain(system, g[8], count * 12) &&
++                    Plain(system, g[7], count * 12) && Plain(system, g[5], count * 12) &&
++                    Plain(system, g[6], count * 12) && Plain(system, g[4], count * 12);
++  if (fast)
++    Shells(FastOf(system), s, s_shells_end, s_shells_scratch);
++  else
++    Shells(Slow{system.GetMMU()}, s, s_shells_end, s_shells_scratch);
++}
++
++void Apply(Core::System& system, const Core::CPUThreadGuard& guard,
++           const DiscIO::VolumeDisc& volume)
++{
++  Reset();
++  s_avx = cpu_info.bAVX && cpu_info.bFMA;
++  const std::vector<Section> sections = TextSections(volume);
++  if (sections.empty())
++    return;
++  // The routines round as the JIT does with FMA and without Exact Multiply-Add.
++  if (!Config::Get(Config::SESSION_USE_FMA) || Config::Get(Config::MAIN_ACCURATE_FMADDS))
++  {
++    Repatch(system);
++    return;
++  }
++  for (std::size_t r = 0; r < std::size(kRoutines); ++r)
++  {
++    const Routine& routine = kRoutines[r];
++    const std::vector<Match> found = Find(guard, sections, routine);
++    if (found.empty())
++      continue;
++    // Every copy must use the same displacements: a hook doesn't know which
++    // copy called it.
++    bool same = true;
++    for (const Match& match : found)
++      same = same && std::equal(std::begin(match.displacement), std::end(match.displacement),
++                                std::begin(found[0].displacement));
++    if (!same)
++      continue;
++    const s16* const d = found[0].displacement;
++    if (routine.words == kOffsetShells)
++    {
++      // Hooked mid-function, so it must know where it continues: one copy only.
++      // The byte's doubleword: the high word and the low one just after it,
++      // read back from the same place.
++      if (found.size() != 1 || d[1] != d[0] + 4 || d[2] != d[0])
++        continue;
++      s_shells_end = found[0].address + routine.count * 4;
++      s_shells_scratch = d[0];
++    }
++    else
++    {
++      s_clear_at[routine.words == kSkinMorphAccumulate ? 1 : 0] = d[0];
++    }
++    for (const Match& match : found)
++    {
++      s_hooked.push_back({match.address, routine.hook});
++      std::fprintf(stderr, "native: %s found at %08x\n", routine.what, match.address);
++    }
++  }
++  Repatch(system);
++}
++
++void Repatch(Core::System& system)
++{
++  for (const Hooked& hooked : s_hooked)
++    HLE::Patch(system, hooked.address, hooked.hook);
++}
++
++void Reset()
++{
++  s_hooked.clear();
++  s_shells_end = 0;
++  s_clear_at[0] = s_clear_at[1] = -0x6158;
++  s_shells_scratch = 0x50;
++  for (auto& logged : s_logged)
++    logged = false;
++}
++}  // namespace HLE_PorpoiseNative
+diff --git a/Source/Core/Core/HLE/HLE_PorpoiseNative.h b/Source/Core/Core/HLE/HLE_PorpoiseNative.h
+new file mode 100644
+index 0000000000..41c82d71b8
+--- /dev/null
++++ b/Source/Core/Core/HLE/HLE_PorpoiseNative.h
+@@ -0,0 +1,40 @@
++// Porpoise's native routines.
++// Copyright (C) 2026 Ruben (Project Porpoise)
++// SPDX-License-Identifier: GPL-2.0-or-later
++//
++// A few hot game routines, found by their exact machine code when the game
++// boots, run as native code instead of through the JIT. Each gives the same
++// memory and the same registers the game's own code would (the same rounding,
++// step by step, as Dolphin's JIT), only faster. Nothing is hooked for a game
++// that doesn't contain the code word for word.
++
++#pragma once
++
++namespace Core
++{
++class CPUThreadGuard;
++class System;
++}  // namespace Core
++
++namespace DiscIO
++{
++class VolumeDisc;
++}
++
++namespace HLE_PorpoiseNative
++{
++// After the game's program is in memory: finds the routines and hooks them.
++void Apply(Core::System& system, const Core::CPUThreadGuard& guard,
++           const DiscIO::VolumeDisc& volume);
++
++// Installs the hooks found by Apply again (HLE::PatchFixedFunctions).
++void Repatch(Core::System& system);
++
++// Forgets the game (HLE::Clear).
++void Reset();
++
++// The hooks.
++void SkinAccumulate(const Core::CPUThreadGuard& guard);
++void SkinMorphAccumulate(const Core::CPUThreadGuard& guard);
++void OffsetShells(const Core::CPUThreadGuard& guard);
++}  // namespace HLE_PorpoiseNative
 diff --git a/Source/Core/Core/HLE/HLE_PorpoiseWidescreen.cpp b/Source/Core/Core/HLE/HLE_PorpoiseWidescreen.cpp
 new file mode 100644
 index 0000000000..1039ba713e
@@ -2568,11 +3627,159 @@ index 0000000000..f4ed420486
 +void Perspective(const Core::CPUThreadGuard& guard);
 +void Frustum(const Core::CPUThreadGuard& guard);
 +}  // namespace HLE_PorpoiseWidescreen
+diff --git a/Source/Core/Core/HW/DSP.cpp b/Source/Core/Core/HW/DSP.cpp
+index ae46113e79..c854b845a2 100644
+--- a/Source/Core/Core/HW/DSP.cpp
++++ b/Source/Core/Core/HW/DSP.cpp
+@@ -23,6 +23,8 @@
+ 
+ #include "Core/HW/DSP.h"
+ 
++#include <fmt/format.h>
++
+ #include <memory>
+ 
+ #include "AudioCommon/AudioCommon.h"
+@@ -624,3 +626,20 @@ u32 DSPManager::GetARAMSize() const
+ }
+ 
+ }  // end of namespace DSP
++
++namespace DSP
++{
++std::string DSPManager::PorpoiseState() const
++{
++  const UDSPControl c = m_dsp_control;
++  return fmt::format(
++      "dsp: {} control {:04x} (reset {} halt {} init {} code {}; interrupts ai {}/{} aram {}/{} dsp "
++      "{}/{}; dma busy {}); aram dma mm {:08x} ar {:08x} count {:08x}; audio dma {} blocks {} "
++      "left {}",
++      m_is_lle ? "LLE" : "HLE", c.Hex, u32(c.DSPReset), u32(c.DSPHalt), u32(c.DSPInit),
++      u32(c.DSPInitCode), u32(c.AID), u32(c.AID_mask), u32(c.ARAM), u32(c.ARAM_mask), u32(c.DSP),
++      u32(c.DSP_mask), u32(c.DMAState), m_aram_dma.MMAddr, m_aram_dma.ARAddr, m_aram_dma.Cnt.Hex,
++      m_audio_dma.AudioDMAControl.Enable ? "on" : "off", u32(m_audio_dma.AudioDMAControl.NumBlocks),
++      u32(m_audio_dma.remaining_blocks_count));
++}
++}  // namespace DSP
+diff --git a/Source/Core/Core/HW/DSP.h b/Source/Core/Core/HW/DSP.h
+index 995ffec8cb..fd71798454 100644
+--- a/Source/Core/Core/HW/DSP.h
++++ b/Source/Core/Core/HW/DSP.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include <string>
++
+ #include <memory>
+ 
+ #include "Common/CommonTypes.h"
+@@ -102,6 +104,9 @@ public:
+   void UpdateAudioDMA();
+   void UpdateDSPSlice(int cycles);
+ 
++  // Porpoise: the DSP's control register and DMAs, for a stall report.
++  std::string PorpoiseState() const;
++
+ private:
+   void GenerateDSPInterrupt(u64 DSPIntType, s64 cyclesLate);
+   static void GlobalGenerateDSPInterrupt(Core::System& system, u64 DSPIntType, s64 cyclesLate);
+diff --git a/Source/Core/Core/HW/DVD/DVDInterface.cpp b/Source/Core/Core/HW/DVD/DVDInterface.cpp
+index e7b3401f96..f7ca7ccc29 100644
+--- a/Source/Core/Core/HW/DVD/DVDInterface.cpp
++++ b/Source/Core/Core/HW/DVD/DVDInterface.cpp
+@@ -10,12 +10,15 @@
+ #include <string>
+ #include <vector>
+ 
++#include <fmt/format.h>
++
+ #include "AudioCommon/AudioCommon.h"
+ 
+ #include "Common/Align.h"
+ #include "Common/BitField.h"
+ #include "Common/ChunkFile.h"
+ #include "Common/CommonTypes.h"
++#include "Common/Timer.h"
+ #include "Common/Config/Config.h"
+ #include "Common/Logging/Log.h"
+ 
+@@ -784,6 +787,10 @@ void DVDInterface::ExecuteCommand(ReplyType reply_type)
+ {
+   DIInterruptType interrupt_type = DIInterruptType::TCINT;
+   bool command_handled_by_thread = false;
++  {
++    PorpoiseCommand& c = m_porpoise_commands[m_porpoise_command_count++ % m_porpoise_commands.size()];
++    c = {m_DICMDBUF[0], m_DICMDBUF[1], m_DICMDBUF[2], m_DILENGTH, Common::Timer::NowUs(), 0};
++  }
+ 
+   if (m_system.IsTriforce())
+   {
+@@ -1310,6 +1317,13 @@ void DVDInterface::FinishExecutingCommand(ReplyType reply_type, DIInterruptType
+   // The data parameter contains the requested data iff this was called from DVDThread, and is
+   // empty otherwise. DVDThread is the only source of ReplyType::NoReply and ReplyType::DTK.
+ 
++  if (reply_type != ReplyType::DTK && m_porpoise_command_count)
++  {
++    PorpoiseCommand& c =
++        m_porpoise_commands[(m_porpoise_command_count - 1) % m_porpoise_commands.size()];
++    if (!c.end_us)
++      c.end_us = Common::Timer::NowUs();
++  }
+   u32 transfer_size = 0;
+   if (reply_type == ReplyType::NoReply)
+     transfer_size = static_cast<u32>(data.size());
+@@ -1580,3 +1594,28 @@ void DVDInterface::ScheduleReads(u64 offset, u32 length, const DiscIO::Partition
+ }
+ 
+ }  // namespace DVD
++
++namespace DVD
++{
++std::string DVDInterface::PorpoiseState() const
++{
++  std::string out = fmt::format(
++      "dvd: sr {:08x} cvr {:08x} cr {:08x} (transfer {}) mar {:08x} length {:08x} imm {:08x}; "
++      "stream {}, drive state {}, error {:06x}; last commands:",
++      m_DISR.Hex, m_DICVR.Hex, m_DICR.Hex, m_DICR.TSTART ? "running" : "idle", m_DIMAR, m_DILENGTH,
++      m_DIIMMBUF, m_stream ? 1 : 0, static_cast<int>(m_drive_state),
++      static_cast<u32>(m_error_code));
++  const u64 now = Common::Timer::NowUs();
++  const u32 n = std::min<u32>(m_porpoise_command_count, u32(m_porpoise_commands.size()));
++  for (u32 i = 0; i < n; ++i)
++  {
++    const PorpoiseCommand& c =
++        m_porpoise_commands[(m_porpoise_command_count - n + i) % m_porpoise_commands.size()];
++    out += fmt::format(" [{:08x} {:08x} {:08x} len {:x}, {:.1f} s ago, {}]", c.cmd0, c.cmd1, c.cmd2,
++                       c.length, double(now - c.start_us) / 1e6,
++                       c.end_us ? fmt::format("took {} ms", (c.end_us - c.start_us) / 1000) :
++                                  std::string("not finished"));
++  }
++  return out;
++}
++}  // namespace DVD
 diff --git a/Source/Core/Core/HW/DVD/DVDInterface.h b/Source/Core/Core/HW/DVD/DVDInterface.h
-index 2e3c562e1d..d58036c792 100644
+index 2e3c562e1d..edc1a43eac 100644
 --- a/Source/Core/Core/HW/DVD/DVDInterface.h
 +++ b/Source/Core/Core/HW/DVD/DVDInterface.h
-@@ -146,6 +146,11 @@ public:
+@@ -4,6 +4,7 @@
+ #pragma once
+ 
+ #include <array>
++#include <string>
+ #include <memory>
+ #include <optional>
+ #include <span>
+@@ -136,6 +137,8 @@ public:
+   void ResetDrive(bool spinup);
+   void Shutdown();
+   void DoState(PointerWrap& p);
++  // Porpoise: the interface's registers and its last commands, for a stall report.
++  std::string PorpoiseState() const;
+ 
+   void RegisterMMIO(MMIO::Mapping* mmio, u32 base, bool is_wii);
+ 
+@@ -146,6 +149,11 @@ public:
    void ChangeDisc(const Core::CPUThreadGuard& guard, const std::vector<std::string>& paths);
    void ChangeDisc(const Core::CPUThreadGuard& guard, const std::string& new_path);
    bool AutoChangeDisc(const Core::CPUThreadGuard& guard);
@@ -2584,6 +3791,70 @@ index 2e3c562e1d..d58036c792 100644
  
    // This function returns true and calls SConfig::SetRunningGameMetadata(Volume&, Partition&)
    // if both of the following conditions are true:
+@@ -256,6 +264,15 @@ private:
+     explicit UDICFG(u32 hex) : Hex{hex} {}
+   };
+ 
++  // Porpoise: the last commands, when each started and finished (host time).
++  struct PorpoiseCommand
++  {
++    u32 cmd0 = 0, cmd1 = 0, cmd2 = 0, length = 0;
++    u64 start_us = 0, end_us = 0;
++  };
++  std::array<PorpoiseCommand, 6> m_porpoise_commands{};
++  u32 m_porpoise_command_count = 0;
++
+   // Hardware registers
+   UDISR m_DISR;
+   UDICVR m_DICVR;
+diff --git a/Source/Core/Core/HW/EXI/EXI_Channel.cpp b/Source/Core/Core/HW/EXI/EXI_Channel.cpp
+index 8d47a816e4..0a8324d526 100644
+--- a/Source/Core/Core/HW/EXI/EXI_Channel.cpp
++++ b/Source/Core/Core/HW/EXI/EXI_Channel.cpp
+@@ -5,6 +5,8 @@
+ 
+ #include <memory>
+ 
++#include <fmt/format.h>
++
+ #include "Common/Assert.h"
+ #include "Common/ChunkFile.h"
+ #include "Common/CommonTypes.h"
+@@ -292,3 +294,13 @@ void CEXIChannel::SetEXIINT(bool exiint)
+   m_status.EXIINT = !!exiint;
+ }
+ }  // namespace ExpansionInterface
++
++namespace ExpansionInterface
++{
++std::string CEXIChannel::PorpoiseState() const
++{
++  return fmt::format("status {:08x} control {:08x} (transfer {}) dma {:08x} length {:x} imm {:08x}",
++                     m_status.Hex, m_control.Hex, m_control.TSTART ? "running" : "idle",
++                     m_dma_memory_address, m_dma_length, m_imm_data);
++}
++}  // namespace ExpansionInterface
+diff --git a/Source/Core/Core/HW/EXI/EXI_Channel.h b/Source/Core/Core/HW/EXI/EXI_Channel.h
+index 62f3aafcac..937d14758b 100644
+--- a/Source/Core/Core/HW/EXI/EXI_Channel.h
++++ b/Source/Core/Core/HW/EXI/EXI_Channel.h
+@@ -4,6 +4,7 @@
+ #pragma once
+ 
+ #include <array>
++#include <string>
+ #include <memory>
+ 
+ #include "Common/CommonTypes.h"
+@@ -45,6 +46,8 @@ public:
+ 
+   bool IsCausingInterrupt();
+   void DoState(PointerWrap& p);
++  // Porpoise: the channel's registers, for a stall report.
++  std::string PorpoiseState() const;
+ 
+   // This should only be used to transition interrupts from SP1 to Channel 2
+   void SetEXIINT(bool exiint);
 diff --git a/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp b/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp
 index 1228b2a94f..76f34d0008 100644
 --- a/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp
@@ -2617,6 +3888,58 @@ index 1228b2a94f..76f34d0008 100644
              Core::DisplayMessage(
                  fmt::format("Failed to write save contents to {}", save.m_filename), 10000);
              ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to save data to {}", save.m_filename);
+diff --git a/Source/Core/Core/HW/Memmap.cpp b/Source/Core/Core/HW/Memmap.cpp
+index 06055393dd..e9d87b6bab 100644
+--- a/Source/Core/Core/HW/Memmap.cpp
++++ b/Source/Core/Core/HW/Memmap.cpp
+@@ -7,6 +7,7 @@
+ // may be redirected here (for example to Read_U32()).
+ 
+ #include "Core/HW/Memmap.h"
++#include "Core/PorpoiseStall.h"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -341,6 +342,7 @@ void MemoryManager::AddPageTableMapping(u32 logical_address, u32 translated_addr
+   switch (m_host_page_type)
+   {
+   case HostPageType::SmallPages:
++    ++PorpoiseStall::Mmu().mapped;
+     return AddHostPageTableMapping(logical_address, translated_address, writeable,
+                                    PowerPC::HW_PAGE_SIZE);
+   case HostPageType::LargePages:
+@@ -360,6 +362,10 @@ void MemoryManager::TryAddLargePageTableMapping(u32 logical_address, u32 transla
+       writeable &&
+       TryAddLargePageTableMapping(logical_address, translated_address, m_large_writeable_pages);
+ 
++  if (add_readable || add_writeable)
++    ++PorpoiseStall::Mmu().mapped;
++  else
++    ++PorpoiseStall::Mmu().unmappable;
+   if (add_readable || add_writeable)
+   {
+     AddHostPageTableMapping(logical_address & ~(m_page_size - 1),
+diff --git a/Source/Core/Core/HW/VideoInterface.cpp b/Source/Core/Core/HW/VideoInterface.cpp
+index 42e0f350ba..b8ce38390c 100644
+--- a/Source/Core/Core/HW/VideoInterface.cpp
++++ b/Source/Core/Core/HW/VideoInterface.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "Core/HW/VideoInterface.h"
++#include "Core/PorpoiseStall.h"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -898,6 +899,8 @@ void VideoInterfaceManager::EndField(FieldType field, u64 ticks)
+   m_system.GetPerfMetrics().CountVBlank();
+   m_system.GetVideoEvents().vi_end_field_event.Trigger();
+   Core::OnFrameEnd(m_system);
++  // Porpoise: a game that stops drawing gets a stall report in the trace.
++  PorpoiseStall::Field(m_system);
+ }
+ 
+ // Purpose: Send VI interrupt when triggered
 diff --git a/Source/Core/Core/HW/WII_IPC.h b/Source/Core/Core/HW/WII_IPC.h
 index 64144f43c0..0b611162ae 100644
 --- a/Source/Core/Core/HW/WII_IPC.h
@@ -3013,21 +4336,290 @@ index 871bb3f615..bad7c5d42a 100644
    sigaction(SIGBUS, &old_sa_bus, nullptr);
  #endif
  }
+diff --git a/Source/Core/Core/PorpoiseStall.cpp b/Source/Core/Core/PorpoiseStall.cpp
+new file mode 100644
+index 0000000000..8a2bfa27ef
+--- /dev/null
++++ b/Source/Core/Core/PorpoiseStall.cpp
+@@ -0,0 +1,223 @@
++// Porpoise's stall report.
++// Copyright (C) 2026 Ruben (Project Porpoise)
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "Core/PorpoiseStall.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <string>
++#include <vector>
++
++#include <fmt/format.h>
++
++#include "Common/CommonTypes.h"
++#include "Common/Timer.h"
++#include "Common/GekkoDisassembler.h"
++#include "Core/HW/DSP.h"
++#include "Core/HW/DVD/DVDInterface.h"
++#include "Core/HW/EXI/EXI.h"
++#include "Core/HW/EXI/EXI_Channel.h"
++#include "Core/HW/Memmap.h"
++#include "Core/HW/ProcessorInterface.h"
++#include "Core/PowerPC/PowerPC.h"
++#include "Core/System.h"
++#include "VideoCommon/CommandProcessor.h"
++
++namespace PorpoiseStall
++{
++namespace
++{
++constexpr u64 kStallUs = 4'000'000;
++constexpr u64 kAgainUs = 10'000'000;
++constexpr int kReports = 3;
++
++MmuCounts s_mmu;
++u64 s_mmu_us = 0;
++
++u32 s_write_pointer = 0;
++u64 s_changed_us = 0;
++u64 s_field_us = 0;
++u64 s_reported_us = 0;
++int s_reports = 0;
++std::vector<u32> s_pcs;
++
++void Report(Core::System& system, u64 stalled_us)
++{
++  const auto& ppc = system.GetPPCState();
++  auto& pi = system.GetProcessorInterface();
++  std::string pcs;
++  for (const u32 pc : s_pcs)
++    pcs += fmt::format(" {:08x}", pc);
++  std::fprintf(stderr,
++               "core: stall: no graphics from the game for %.1f s; pc %08x lr %08x msr %08x (EE %u), "
++               "exceptions %08x; pi cause %08x mask %08x; pcs%s\n",
++               double(stalled_us) / 1e6, ppc.pc, LR(ppc), ppc.msr.Hex, (ppc.msr.Hex >> 15) & 1,
++               ppc.Exceptions, pi.GetCause(), pi.GetMask(), pcs.c_str());
++
++  auto& fifo = system.GetCommandProcessor().GetFifo();
++  std::fprintf(stderr,
++               "core: stall: fifo base %08x end %08x read %08x write %08x distance %08x "
++               "breakpoint %08x; read %u link %u breakpoint on %u hit %u; hi %u lo %u\n",
++               fifo.CPBase.load(), fifo.CPEnd.load(), fifo.CPReadPointer.load(),
++               fifo.CPWritePointer.load(), fifo.CPReadWriteDistance.load(),
++               fifo.CPBreakpoint.load(), fifo.bFF_GPReadEnable.load(), fifo.bFF_GPLinkEnable.load(),
++               fifo.bFF_BPEnable.load(), fifo.bFF_Breakpoint.load(), fifo.bFF_HiWatermark.load(),
++               fifo.bFF_LoWatermark.load());
++
++  std::fprintf(stderr, "core: stall: %s\n", system.GetDVDInterface().PorpoiseState().c_str());
++  std::fprintf(stderr, "core: stall: %s\n", system.GetDSP().PorpoiseState().c_str());
++  for (u32 c = 0; c < 3; ++c)
++  {
++    if (auto* channel = system.GetExpansionInterface().GetChannel(c))
++      std::fprintf(stderr, "core: stall: exi %u %s\n", c, channel->PorpoiseState().c_str());
++  }
++
++  auto& memory = system.GetMemory();
++  const u32 mem1 = memory.GetRamSizeReal();
++  const u32 mem2 = memory.GetExRamSizeReal();
++  const auto ok = [&](u32 a) {
++    return (a >= 0x80000000 && a - 0x80000000 + 4 <= mem1) ||
++           (mem2 && a >= 0x90000000 && a - 0x90000000 + 4 <= mem2);
++  };
++  const auto rd = [&](u32 a) -> u32 { return ok(a) ? memory.Read_U32(a & 0x3FFFFFFF) : 0; };
++
++  // The code the game is in (where it loops), and where it was called from.
++  for (const u32 around : {ppc.pc, LR(ppc)})
++  {
++    if (!ok(around))
++      continue;
++    for (u32 a = around - 0x20; a <= around + 0x10; a += 4)
++    {
++      if (!ok(a))
++        continue;
++      const u32 op = rd(a);
++      std::fprintf(stderr, "core: stall: code %08x%s %08x  %s\n", a, a == around ? " >" : "  ", op,
++                   Common::GekkoDisassembler::Disassemble(op, a).c_str());
++    }
++  }
++
++  // A game that stopped itself: the SDK's PPCHalt (sync; nop; li r3, 0; nop; b),
++  // where OSPanic ends after printing why. The registers, and any text the
++  // registers or the stack point at: the panic's file, line and message.
++  if (rd(ppc.pc) == 0x60000000 && rd(ppc.pc - 4) == 0x7C0004AC && rd(ppc.pc + 4) == 0x38600000 &&
++      rd(ppc.pc + 12) == 0x4BFFFFF4)
++  {
++    std::fprintf(stderr, "core: stall: the game halted itself (PPCHalt: an OSPanic, a fatal error "
++                         "of its own)\n");
++    std::string regs;
++    for (int i = 0; i < 32; ++i)
++      regs += fmt::format(" r{}={:08x}", i, ppc.gpr[i]);
++    std::fprintf(stderr, "core: stall: registers%s\n", regs.c_str());
++    // The last exception the game took (a page fault it couldn't serve, for one).
++    std::fprintf(stderr,
++                 "core: stall: last exception: srr0 %08x srr1 %08x dar %08x dsisr %08x\n",
++                 ppc.spr[SPR_SRR0], ppc.spr[SPR_SRR1], ppc.spr[SPR_DAR], ppc.spr[SPR_DSISR]);
++    std::vector<u32> seen;
++    const auto text = [&](u32 a) {
++      if (!ok(a) || seen.size() >= 24 || std::find(seen.begin(), seen.end(), a) != seen.end())
++        return;
++      std::string out;
++      for (u32 i = 0; i < 160 && ok(a + i); ++i)
++      {
++        const u8 c = memory.Read_U8((a + i) & 0x3FFFFFFF);
++        if (c == 0)
++          break;
++        if (c == '\n')
++        {
++          out += "\\n";
++          continue;
++        }
++        if (c < 0x20 || c > 0x7E)
++          return;
++        out += char(c);
++      }
++      if (out.size() < 4)
++        return;
++      seen.push_back(a);
++      std::fprintf(stderr, "core: stall: text at %08x: \"%s\"\n", a, out.c_str());
++    };
++    for (int i = 0; i < 32; ++i)
++      text(ppc.gpr[i]);
++    for (u32 a = ppc.gpr[1]; a < ppc.gpr[1] + 0x400; a += 4)
++      text(rd(a));
++  }
++
++  // The game's threads (the SDK's OSThread list): what each is doing and
++  // where it waits.
++  const u32 current = rd(0x800000E4);
++  u32 t = rd(0x800000DC);
++  for (int n = 0; n < 24 && ok(t) && ok(t + 0x308); ++n)
++  {
++    const u32 sp = rd(t + 0x04);
++    std::string bt;
++    u32 frame = rd(sp);
++    for (int d = 0; d < 8 && ok(frame) && ok(frame + 4); ++d)
++    {
++      bt += fmt::format(" {:08x}", rd(frame + 4));
++      const u32 next = rd(frame);
++      if (next <= frame)
++        break;
++      frame = next;
++    }
++    std::fprintf(stderr,
++                 "core: stall: thread %08x%s state %u prio %d suspend %d waits on %08x mutex %08x "
++                 "pc %08x lr %08x; calls%s\n",
++                 t, t == current ? " (running)" : "", rd(t + 0x2C8) >> 16,
++                 static_cast<s32>(rd(t + 0x2D0)), static_cast<s32>(rd(t + 0x2CC)), rd(t + 0x2DC),
++                 rd(t + 0x2F0), rd(t + 0x198), rd(t + 0x84), bt.c_str());
++    t = rd(t + 0x2FC);
++  }
++  std::fflush(stderr);
++}
++}  // namespace
++
++MmuCounts& Mmu()
++{
++  return s_mmu;
++}
++
++void Field(Core::System& system)
++{
++  const u64 now = Common::Timer::NowUs();
++  if (!s_mmu_us)
++    s_mmu_us = now;
++  if (now - s_mmu_us >= 5'000'000)
++  {
++    if (s_mmu.rescans || s_mmu.mapped || s_mmu.unmappable || s_mmu.faults)
++    {
++      std::fprintf(stderr,
++                   "mmu: %.0f s: page table rescans %llu (%.1f ms), pages mapped %llu, pages that "
++                   "couldn't be (the host's larger pages) %llu, fastmem faults %llu\n",
++                   double(now - s_mmu_us) / 1e6, (unsigned long long)s_mmu.rescans,
++                   double(s_mmu.rescan_us) / 1e3, (unsigned long long)s_mmu.mapped,
++                   (unsigned long long)s_mmu.unmappable, (unsigned long long)s_mmu.faults);
++    }
++    s_mmu = {};
++    s_mmu_us = now;
++  }
++  // A gap between fields is the emulation paused (the menu): not the game's time.
++  if (s_field_us && now - s_field_us > 500'000)
++    s_changed_us += now - s_field_us;
++  s_field_us = now;
++
++  const u32 write = system.GetCommandProcessor().GetFifo().CPWritePointer.load();
++  if (write != s_write_pointer || !s_changed_us)
++  {
++    s_write_pointer = write;
++    s_changed_us = now;
++    s_reports = 0;
++    s_pcs.clear();
++    return;
++  }
++  const u32 pc = system.GetPPCState().pc;
++  if (s_pcs.size() < 12 && std::find(s_pcs.begin(), s_pcs.end(), pc) == s_pcs.end())
++    s_pcs.push_back(pc);
++  if (now - s_changed_us < kStallUs || s_reports >= kReports ||
++      (s_reports && now - s_reported_us < kAgainUs))
++    return;
++  ++s_reports;
++  s_reported_us = now;
++  Report(system, now - s_changed_us);
++}
++}  // namespace PorpoiseStall
+diff --git a/Source/Core/Core/PorpoiseStall.h b/Source/Core/Core/PorpoiseStall.h
+new file mode 100644
+index 0000000000..859935d20f
+--- /dev/null
++++ b/Source/Core/Core/PorpoiseStall.h
+@@ -0,0 +1,33 @@
++// Porpoise's stall report.
++// Copyright (C) 2026 Ruben (Project Porpoise)
++// SPDX-License-Identifier: GPL-2.0-or-later
++//
++// When a game stops sending graphics for several seconds while the console
++// keeps running (a freeze that isn't a crash), the trace gets what the game
++// was waiting on: where its code is, its threads, and the disc drive, memory
++// card, graphics FIFO and interrupt state. A few reports a stall, no more.
++
++#pragma once
++
++namespace Core
++{
++class System;
++}
++
++#include "Common/CommonTypes.h"
++
++namespace PorpoiseStall
++{
++// Every video field, on the CPU thread.
++void Field(Core::System& system);
++
++// What a game's virtual memory (the MMU's page table) costs, counted on the CPU
++// thread and written to the trace every 5 s while there is any.
++struct MmuCounts
++{
++  u64 rescans = 0, rescan_us = 0;
++  u64 mapped = 0, unmappable = 0;
++  u64 faults = 0;
++};
++MmuCounts& Mmu();
++}  // namespace PorpoiseStall
 diff --git a/Source/Core/Core/PowerPC/Jit64/Jit.cpp b/Source/Core/Core/PowerPC/Jit64/Jit.cpp
-index 1248b1ab01..763dde53da 100644
+index 1248b1ab01..928e60819a 100644
 --- a/Source/Core/Core/PowerPC/Jit64/Jit.cpp
 +++ b/Source/Core/Core/PowerPC/Jit64/Jit.cpp
-@@ -2,6 +2,9 @@
+@@ -2,6 +2,10 @@
  // SPDX-License-Identifier: GPL-2.0-or-later
  
  #include "Core/PowerPC/Jit64/Jit.h"
++#include "Core/PorpoiseStall.h"
 +#include "Core/Config/MainSettings.h"
 +#include "Common/StringUtil.h"
 +#include <algorithm>
  
  #include <map>
  #include <span>
-@@ -21,6 +24,7 @@
+@@ -21,6 +25,7 @@
  #include "Common/GekkoDisassembler.h"
  #include "Common/HostDisassembler.h"
  #include "Common/IOFile.h"
@@ -3035,7 +4627,7 @@ index 1248b1ab01..763dde53da 100644
  #include "Common/Logging/Log.h"
  #include "Common/Swap.h"
  #include "Common/x64ABI.h"
-@@ -49,6 +53,10 @@
+@@ -49,6 +54,10 @@
  #include "Core/System.h"
  
  using namespace Gen;
@@ -3046,7 +4638,32 @@ index 1248b1ab01..763dde53da 100644
  using namespace PowerPC;
  
  // Dolphin's PowerPC->x86_64 JIT dynamic recompiler
-@@ -262,7 +270,7 @@ void Jit64::Init()
+@@ -165,6 +174,7 @@ bool Jit64::HandleFault(uintptr_t access_address, SContext* ctx)
+ 
+ bool Jit64::BackPatch(SContext* ctx)
+ {
++  ++PorpoiseStall::Mmu().faults;
+   u8* codePtr = reinterpret_cast<u8*>(ctx->CTX_PC);
+ 
+   if (!IsInSpace(codePtr))
+@@ -178,6 +188,8 @@ bool Jit64::BackPatch(SContext* ctx)
+   }
+ 
+   TrampolineInfo& info = it->second;
++  if (m_porpoise_slow_pcs.size() < (1u << 20))
++    m_porpoise_slow_pcs.insert(info.pc);
+ 
+   u8* exceptionHandler = nullptr;
+   if (jo.memcheck)
+@@ -255,6 +267,7 @@ bool Jit64::BackPatch(SContext* ctx)
+ 
+ void Jit64::Init()
+ {
++  m_porpoise_slow_pcs.clear();
+   InitFastmemArena();
+ 
+   RefreshConfig();
+@@ -262,7 +275,7 @@ void Jit64::Init()
    EnableBlockLink();
  
    jo.optimizeGatherPipe = true;
@@ -3055,7 +4672,7 @@ index 1248b1ab01..763dde53da 100644
    js.fastmemLoadStore = nullptr;
    js.compilerPC = 0;
  
-@@ -734,6 +742,19 @@ void Jit64::WriteExternalExceptionExit()
+@@ -734,6 +747,19 @@ void Jit64::WriteExternalExceptionExit()
  void Jit64::Run()
  {
    ProtectStack();
@@ -3075,7 +4692,7 @@ index 1248b1ab01..763dde53da 100644
    m_system.GetJitInterface().UpdateMembase();
  
    CompiledCode pExecAddr = (CompiledCode)asm_routines.enter_code;
-@@ -992,6 +1013,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -992,6 +1018,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
      IntializeSpeculativeConstants();
    }
  
@@ -3084,7 +4701,7 @@ index 1248b1ab01..763dde53da 100644
    // Translate instructions
    for (u32 i = 0; i < code_block.m_num_instructions; i++)
    {
-@@ -1035,6 +1058,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -1035,6 +1063,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
        // asynchronous.
        if (gatherPipeIntCheck)
        {
@@ -3092,7 +4709,7 @@ index 1248b1ab01..763dde53da 100644
          TEST(32, PPCSTATE(Exceptions), Imm32(EXCEPTION_EXTERNAL_INT));
          FixupBranch extException = J_CC(CC_NZ, Jump::Near);
  
-@@ -1064,6 +1088,11 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -1064,6 +1093,11 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
        }
      }
  
@@ -3104,7 +4721,7 @@ index 1248b1ab01..763dde53da 100644
      if (HandleFunctionHooking(op.address))
        break;
  
-@@ -1079,6 +1108,24 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -1079,6 +1113,24 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
      }
      else
      {
@@ -3129,7 +4746,7 @@ index 1248b1ab01..763dde53da 100644
        auto& cpu = m_system.GetCPU();
        auto& power_pc = m_system.GetPowerPC();
        if (IsDebuggingEnabled() && power_pc.GetBreakPoints().IsAddressBreakPoint(op.address) &&
-@@ -1240,6 +1287,15 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -1240,6 +1292,15 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
        gpr.Flush(~op.gprWillBeWritten & op.regsOut, RegCache::FlushMode::Undirty);
        fpr.Flush(~op.fprWillBeWritten & op.GetFregsOut(), RegCache::FlushMode::Undirty);
  
@@ -3145,7 +4762,7 @@ index 1248b1ab01..763dde53da 100644
        if (opinfo->flags & FL_LOADSTORE)
          ++js.numLoadStoreInst;
  
-@@ -1260,6 +1316,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
+@@ -1260,6 +1321,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
  
    if (code_block.m_broken)
    {
@@ -3153,7 +4770,7 @@ index 1248b1ab01..763dde53da 100644
      gpr.Flush();
      fpr.Flush();
      WriteExit(nextPC);
-@@ -1386,6 +1443,177 @@ void Jit64::FlushRegistersBeforeSlowAccess()
+@@ -1386,6 +1448,177 @@ void Jit64::FlushRegistersBeforeSlowAccess()
    }
  }
  
@@ -3332,10 +4949,23 @@ index 1248b1ab01..763dde53da 100644
  {
    const auto result = HLE::TryReplaceFunction(m_ppc_symbol_db, address, PowerPC::CoreMode::JIT);
 diff --git a/Source/Core/Core/PowerPC/Jit64/Jit.h b/Source/Core/Core/PowerPC/Jit64/Jit.h
-index da1be2db04..74e36f4016 100644
+index da1be2db04..5eda309d8d 100644
 --- a/Source/Core/Core/PowerPC/Jit64/Jit.h
 +++ b/Source/Core/Core/PowerPC/Jit64/Jit.h
-@@ -277,6 +277,14 @@ private:
+@@ -272,11 +272,27 @@ public:
+ 
+   void eieio(UGeckoInstruction inst);
+ 
++  // Porpoise: the game's load and store instructions (by address) whose fastmem
++  // access faulted once already: compiled again (a block invalidated, a page of
++  // code swapped back in), they take the checked path at once instead of
++  // faulting again. A fault is a trip through the PS5's exception handler, and
++  // a game paging its code and data through the MMU (Rogue Leader) faults tens
++  // of thousands of times when it loads something new.
++  std::unordered_set<u32> m_porpoise_slow_pcs;
++
+ private:
+   void CompileInstruction(PPCAnalyst::CodeOp& op);
  
    bool HandleFunctionHooking(u32 address);
  
@@ -3425,6 +5055,28 @@ index 2e1b05cb42..b99786cdce 100644
  
    RCOpArg Ra = fpr.Use(a, RCMode::Read);
    RCOpArg Rc = fpr.Use(c, RCMode::Read);
+diff --git a/Source/Core/Core/PowerPC/Jit64Common/EmuCodeBlock.cpp b/Source/Core/Core/PowerPC/Jit64Common/EmuCodeBlock.cpp
+index 1019aa7d0a..0c7fcf4053 100644
+--- a/Source/Core/Core/PowerPC/Jit64Common/EmuCodeBlock.cpp
++++ b/Source/Core/Core/PowerPC/Jit64Common/EmuCodeBlock.cpp
+@@ -330,7 +330,7 @@ void EmuCodeBlock::SafeLoadToReg(X64Reg reg_value, const Gen::OpArg& opAddress,
+   auto& js = m_jit.js;
+   registersInUse[reg_value] = false;
+   if (m_jit.jo.fastmem && !(flags & (SAFE_LOADSTORE_NO_FASTMEM | SAFE_LOADSTORE_NO_UPDATE_PC)) &&
+-      !force_slow_access)
++      !force_slow_access && !m_jit.m_porpoise_slow_pcs.contains(js.compilerPC))
+   {
+     u8* backpatchStart = GetWritableCodePtr();
+     MovInfo mov;
+@@ -504,7 +504,7 @@ void EmuCodeBlock::SafeWriteRegToReg(OpArg reg_value, X64Reg reg_addr, int acces
+ 
+   auto& js = m_jit.js;
+   if (m_jit.jo.fastmem && !(flags & (SAFE_LOADSTORE_NO_FASTMEM | SAFE_LOADSTORE_NO_UPDATE_PC)) &&
+-      !force_slow_access)
++      !force_slow_access && !m_jit.m_porpoise_slow_pcs.contains(js.compilerPC))
+   {
+     u8* backpatchStart = GetWritableCodePtr();
+     MovInfo mov;
 diff --git a/Source/Core/Core/PowerPC/JitCommon/JitBase.cpp b/Source/Core/Core/PowerPC/JitCommon/JitBase.cpp
 index b2ff246cce..90439557da 100644
 --- a/Source/Core/Core/PowerPC/JitCommon/JitBase.cpp
@@ -3527,6 +5179,45 @@ index f229be35f2..5363634406 100644
      exception_addresses->insert(ppc_state.pc);
  
      // Invalidate the JIT block so that it gets recompiled with the external exception check
+diff --git a/Source/Core/Core/PowerPC/MMU.cpp b/Source/Core/Core/PowerPC/MMU.cpp
+index 940e93c7ea..ebced0b30b 100644
+--- a/Source/Core/Core/PowerPC/MMU.cpp
++++ b/Source/Core/Core/PowerPC/MMU.cpp
+@@ -25,6 +25,8 @@
+ 
+ #include "Core/PowerPC/MMU.h"
+ 
++#include "Core/PorpoiseStall.h"
++
+ #include <algorithm>
+ #include <bit>
+ #include <cstddef>
+@@ -42,6 +44,7 @@
+ #include "Common/BitUtils.h"
+ #include "Common/ChunkFile.h"
+ #include "Common/CommonTypes.h"
++#include "Common/Timer.h"
+ #include "Common/Logging/Log.h"
+ 
+ #include "Core/Core.h"
+@@ -1409,6 +1412,17 @@ void MMU::ReloadPageTable()
+ void MMU::PageTableUpdated()
+ {
+   m_ppc_state.pagetable_update_pending = false;
++  // Porpoise: counted for the trace (PorpoiseStall).
++  struct Timed
++  {
++    u64 start = Common::Timer::NowUs();
++    ~Timed()
++    {
++      auto& mmu = PorpoiseStall::Mmu();
++      ++mmu.rescans;
++      mmu.rescan_us += Common::Timer::NowUs() - start;
++    }
++  } timed;
+ 
+   if (!m_system.GetJitInterface().WantsPageTableMappings())
+   {
 diff --git a/Source/Core/Core/PowerPC/PPCAnalyst.h b/Source/Core/Core/PowerPC/PPCAnalyst.h
 index f9081bae93..501a3266f7 100644
 --- a/Source/Core/Core/PowerPC/PPCAnalyst.h
@@ -3927,7 +5618,7 @@ index a96698067d..5f74d2dbe2 100644
  extern "C" {
  
 diff --git a/Source/Core/DolphinLibretro/Boot.cpp b/Source/Core/DolphinLibretro/Boot.cpp
-index c53281053f..e2260dc848 100644
+index c53281053f..6eabcc2010 100644
 --- a/Source/Core/DolphinLibretro/Boot.cpp
 +++ b/Source/Core/DolphinLibretro/Boot.cpp
 @@ -1,4 +1,5 @@
@@ -4282,7 +5973,7 @@ index c53281053f..e2260dc848 100644
      }
  
      const std::string wii_menu_tmd_file_name = Common::GetTMDFileName(Titles::SYSTEM_MENU, Common::FromWhichRoot::Configured);
-@@ -727,17 +982,45 @@ bool retro_load_game(const struct retro_game_info* game)
+@@ -727,17 +982,47 @@ bool retro_load_game(const struct retro_game_info* game)
  
      if (is_disc_title && wii_menu_installed)
      {
@@ -4304,6 +5995,8 @@ index c53281053f..e2260dc848 100644
 +
 +#ifdef __PROSPERO__
 +  std::fprintf(stderr, "core: booting (%s)\n", porpoise_menu.empty() ? "the game" : porpoise_menu.c_str());
++  std::fprintf(stderr, "core: cpu vendor %d, %s, PEXT/PDEP %s\n", static_cast<int>(cpu_info.vendor),
++               cpu_info.Summarize().c_str(), cpu_info.bBMI2FastParallelBitOps ? "used" : "not used");
 +#endif
    if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot_params), wsi))
    {
@@ -4330,7 +6023,7 @@ index c53281053f..e2260dc848 100644
    Libretro::Input::InitStage2();
  
    const bool importCheats = Libretro::GetOption<bool>(retroarch_core::CHEATS_IMPORT, true);
-@@ -804,6 +1087,7 @@ void retro_unload_game(void)
+@@ -804,6 +1089,7 @@ void retro_unload_game(void)
  
      Core::Shutdown(system);
    }
@@ -4338,7 +6031,7 @@ index c53281053f..e2260dc848 100644
  
    if (!g_context_status.IsDestroyed() && g_video_backend)
      g_video_backend->Shutdown();
-@@ -841,6 +1125,12 @@ static bool retro_set_eject_state(bool ejected)
+@@ -841,6 +1127,12 @@ static bool retro_set_eject_state(bool ejected)
  
    eject_state = ejected;
  
@@ -4351,7 +6044,7 @@ index c53281053f..e2260dc848 100644
    Core::RunOnCPUThread(Core::System::GetInstance(), [ejected] {
      auto& system = Core::System::GetInstance();
      Core::CPUThreadGuard guard{system};
-@@ -853,6 +1143,8 @@ static bool retro_set_eject_state(bool ejected)
+@@ -853,6 +1145,8 @@ static bool retro_set_eject_state(bool ejected)
        system.GetDVDInterface().ChangeDisc(guard, path);
      }
    }, true); // wait_for_completion = true
@@ -4360,7 +6053,7 @@ index c53281053f..e2260dc848 100644
  
    return true;
  }
-@@ -864,6 +1156,11 @@ static bool retro_get_eject_state()
+@@ -864,6 +1158,11 @@ static bool retro_get_eject_state()
  
  static unsigned retro_get_image_index()
  {
@@ -4657,20 +6350,24 @@ index 1a1915cd1d..5eda0c9842 100644
    }
  #if defined(ANDROID) && defined(_DEBUG)
 diff --git a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
-index cd8753b666..ff2dfac043 100644
+index cd8753b666..b250d9f187 100644
 --- a/Source/Core/DolphinLibretro/Main.cpp
 +++ b/Source/Core/DolphinLibretro/Main.cpp
-@@ -1,7 +1,9 @@
+@@ -1,7 +1,13 @@
  
 +#include <atomic>
  #include <cstdint>
  #include <libretro.h>
  #include <string>
 +#include <chrono>
++#include <cstring>
++#include <algorithm>
++#include <optional>
++#include <string>
  #include <thread>
  
  #include <fstream>
-@@ -35,6 +37,12 @@
+@@ -35,6 +41,12 @@
  #include "Core/PatchEngine.h"
  #include "Core/State.h"
  #include "Core/System.h"
@@ -4683,7 +6380,7 @@ index cd8753b666..ff2dfac043 100644
  #include "DolphinLibretro/Audio.h"
  #include "DolphinLibretro/Input.h"
  #include "DolphinLibretro/Common/Options.h"
-@@ -82,10 +90,61 @@ extern void reload_cheats_from_ini();
+@@ -82,10 +94,61 @@ extern void reload_cheats_from_ini();
  extern unsigned msg_interface_version;
  }  // namespace Libretro
  
@@ -4745,7 +6442,7 @@ index cd8753b666..ff2dfac043 100644
    Libretro::environ_cb = cb;
  #ifdef PERF_TEST
    environ_cb(RETRO_ENVIRONMENT_GET_PERF_INTERFACE, &perf_cb);
-@@ -203,8 +262,74 @@ void retro_reset(void)
+@@ -203,8 +266,126 @@ void retro_reset(void)
    Core::System::GetInstance().GetProcessorInterface().ResetButton_Tap();
  }
  
@@ -4790,7 +6487,19 @@ index cd8753b666..ff2dfac043 100644
 +{
 +extern std::atomic<long long> g_porpoise_gpu_ns;
 +}  // namespace Fifo
++namespace Vulkan
++{
++extern std::atomic<long long> g_porpoise_gpu_wait_ns;
++}  // namespace Vulkan
++namespace VideoCommon
++{
++extern std::atomic<long long> g_porpoise_shader_ns;
++extern std::atomic<unsigned> g_porpoise_shaders;
++}  // namespace VideoCommon
 +}
++// Porpoise: the CPU and the GPU on one thread (a game Dolphin's database keeps on one
++// core): the whole frame is timed as the CPU's.
++static std::atomic<bool> s_porpoise_single_core{false};
 +
 +// Porpoise: where a frame's time goes, since the last call. cpu_ms: the CPU thread's run of
 +// a frame step on average; cpu_max_ms: the longest; gpu_ms: the video loop's busy time per
@@ -4812,6 +6521,46 @@ index cd8753b666..ff2dfac043 100644
 +  return frames;
 +}
 +
++// Porpoise 4.6: a game's own settings (Dolphin's Sys/GameSettings fixes, and the player's
++// per-game ones in its LocalGame ini) win over the frontend's options, as they do at boot.
++// The options were written straight into g_Config whenever any of them changed (and at the
++// first frame), quietly undoing those fixes: Pokemon XD's safe texture cache, Eternal
++// Darkness's XFB copies, Punch-Out!!'s texture cache.
++extern "C++"
++{
++template <typename T>
++static bool PorpoiseGameOwns(const Config::Info<T>& info)
++{
++  const Config::LayerType layer = Config::GetActiveLayerForConfig(info);
++  return layer == Config::LayerType::GlobalGame || layer == Config::LayerType::LocalGame;
++}
++}
++
++// Porpoise 4.6: everything above, and the PS5's GPU (time the video thread waited for it to
++// finish a frame), the shaders made on the spot while the game waited, and whether the
++// game runs on one core. out_size: sizeof what the frontend passes (fields only grow).
++struct PorpoisePerf
++{
++  double cpu_ms, cpu_max_ms, gpu_ms, gpu_wait_ms, shader_ms;
++  unsigned frames, shaders;
++  int single_core;
++};
++extern "C" __attribute__((visibility("default"))) unsigned porpoise_perf_take2(PorpoisePerf* out,
++                                                                             unsigned out_size)
++{
++  PorpoisePerf p{};
++  const unsigned frames = porpoise_perf_take(&p.cpu_ms, &p.cpu_max_ms, &p.gpu_ms);
++  const long long wait = Vulkan::g_porpoise_gpu_wait_ns.exchange(0, std::memory_order_relaxed);
++  p.gpu_wait_ms = frames ? wait / 1e6 / frames : 0.0;
++  p.shader_ms = VideoCommon::g_porpoise_shader_ns.exchange(0, std::memory_order_relaxed) / 1e6;
++  p.shaders = VideoCommon::g_porpoise_shaders.exchange(0, std::memory_order_relaxed);
++  p.frames = frames;
++  p.single_core = s_porpoise_single_core.load(std::memory_order_relaxed) ? 1 : 0;
++  if (out)
++    std::memcpy(out, &p, std::min<std::size_t>(out_size, sizeof p));
++  return frames;
++}
++
  void retro_run(void)
  {
 +#ifdef __PROSPERO__
@@ -4820,7 +6569,7 @@ index cd8753b666..ff2dfac043 100644
    Libretro::Input::InitSensors();
    Libretro::Options::CheckForUpdatedVariables();
    Libretro::FrameTiming::CheckForFastForwarding();
-@@ -252,8 +377,20 @@ void retro_run(void)
+@@ -252,8 +433,20 @@ void retro_run(void)
  
        // Wait until CPU thread has reached Run()
        auto& cpu_manager = system.GetCPU();
@@ -4841,7 +6590,99 @@ index cd8753b666..ff2dfac043 100644
      }
      else
        Core::EmuThread(system, std::move(Core::g_boot_params), wsi);
-@@ -482,6 +619,7 @@ void retro_run(void)
+@@ -413,57 +606,74 @@ void retro_run(void)
+     );
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_TO_TEXTURE))
+-    g_Config.bSkipEFBCopyToRam = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_TO_TEXTURE, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM))
++      g_Config.bSkipEFBCopyToRam = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_TO_TEXTURE, true);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_ACCESS_ENABLE))
+-    g_Config.bEFBAccessEnable = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_ACCESS_ENABLE, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_EFB_ACCESS_ENABLE))
++      g_Config.bEFBAccessEnable = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_ACCESS_ENABLE, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_ACCESS_DEFER_INVALIDATION))
+-    g_Config.bEFBAccessDeferInvalidation = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_ACCESS_DEFER_INVALIDATION, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_EFB_DEFER_INVALIDATION))
++      g_Config.bEFBAccessDeferInvalidation = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_ACCESS_DEFER_INVALIDATION, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_ACCESS_TILE_SIZE))
+-    g_Config.iEFBAccessTileSize = Libretro::Options::GetCached<int>(Libretro::Options::gfx_hacks::EFB_ACCESS_TILE_SIZE, 64);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_EFB_ACCESS_TILE_SIZE))
++      g_Config.iEFBAccessTileSize = Libretro::Options::GetCached<int>(Libretro::Options::gfx_hacks::EFB_ACCESS_TILE_SIZE, 64);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::BBOX_ENABLED))
+-    g_Config.bBBoxEnable = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::BBOX_ENABLED, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_BBOX_ENABLE))
++      g_Config.bBBoxEnable = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::BBOX_ENABLED, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::XFB_TO_TEXTURE_ENABLE))
+-    g_Config.bSkipXFBCopyToRam = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::XFB_TO_TEXTURE_ENABLE, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_SKIP_XFB_COPY_TO_RAM))
++      g_Config.bSkipXFBCopyToRam = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::XFB_TO_TEXTURE_ENABLE, true);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_TO_VRAM))
+-    g_Config.bDisableCopyToVRAM = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_TO_VRAM, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_DISABLE_COPY_TO_VRAM))
++      g_Config.bDisableCopyToVRAM = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_TO_VRAM, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::DEFER_EFB_COPIES))
+-    g_Config.bDeferEFBCopies = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::DEFER_EFB_COPIES, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_DEFER_EFB_COPIES))
++      g_Config.bDeferEFBCopies = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::DEFER_EFB_COPIES, true);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::IMMEDIATE_XFB))
+-    g_Config.bImmediateXFB = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::IMMEDIATE_XFB, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_IMMEDIATE_XFB))
++      g_Config.bImmediateXFB = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::IMMEDIATE_XFB, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::SKIP_DUPE_FRAMES))
+-    g_Config.bSkipPresentingDuplicateXFBs = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::SKIP_DUPE_FRAMES, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_SKIP_DUPLICATE_XFBS))
++      g_Config.bSkipPresentingDuplicateXFBs = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::SKIP_DUPE_FRAMES, true);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_SCALED_COPY))
+-    g_Config.bCopyEFBScaled = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_SCALED_COPY, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_COPY_EFB_SCALED))
++      g_Config.bCopyEFBScaled = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_SCALED_COPY, true);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::EFB_EMULATE_FORMAT_CHANGES))
+-    g_Config.bEFBEmulateFormatChanges = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_EMULATE_FORMAT_CHANGES, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_EFB_EMULATE_FORMAT_CHANGES))
++      g_Config.bEFBEmulateFormatChanges = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::EFB_EMULATE_FORMAT_CHANGES, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::VERTEX_ROUNDING))
+-    g_Config.bVertexRounding = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::VERTEX_ROUNDING, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_VERTEX_ROUNDING))
++      g_Config.bVertexRounding = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::VERTEX_ROUNDING, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::VI_SKIP))
+-    g_Config.bVISkip = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::VI_SKIP, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_VI_SKIP))
++      g_Config.bVISkip = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::VI_SKIP, false);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::FAST_TEXTURE_SAMPLING))
+-    g_Config.bFastTextureSampling = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::FAST_TEXTURE_SAMPLING, true);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_FAST_TEXTURE_SAMPLING))
++      g_Config.bFastTextureSampling = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::FAST_TEXTURE_SAMPLING, true);
+ 
+ #ifdef __APPLE__
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_hacks::NO_MIPMAPPING))
+-    g_Config.bNoMipmapping = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::NO_MIPMAPPING, false);
++    if (!PorpoiseGameOwns(Config::GFX_HACK_NO_MIPMAPPING))
++      g_Config.bNoMipmapping = Libretro::Options::GetCached<bool>(Libretro::Options::gfx_hacks::NO_MIPMAPPING, false);
+ #endif
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::gfx_settings::TEXTURE_CACHE_ACCURACY))
+-    g_Config.iSafeTextureCache_ColorSamples = Libretro::Options::GetCached<int>(Libretro::Options::gfx_settings::TEXTURE_CACHE_ACCURACY, 128);
++    if (!PorpoiseGameOwns(Config::GFX_SAFE_TEXTURE_CACHE_COLOR_SAMPLES))
++      g_Config.iSafeTextureCache_ColorSamples = Libretro::Options::GetCached<int>(Libretro::Options::gfx_settings::TEXTURE_CACHE_ACCURACY, 128);
+ 
+   if (Libretro::Options::IsUpdated(Libretro::Options::sysconf::WII_SPEAK_MUTED))
+     Config::SetCurrent(Config::MAIN_WII_SPEAK_MUTED,
+@@ -482,6 +692,7 @@ void retro_run(void)
    RETRO_PERFORMANCE_INIT(dolphin_main_func);
    RETRO_PERFORMANCE_START(dolphin_main_func);
  
@@ -4849,15 +6690,26 @@ index cd8753b666..ff2dfac043 100644
    if (system.IsDualCoreMode())
    {
      Core::DoFrameStep(system);
-@@ -491,6 +629,7 @@ void retro_run(void)
+@@ -489,8 +700,18 @@ void retro_run(void)
+   }
+   else
    {
++    const auto porpoise_from = std::chrono::steady_clock::now();
      system.GetCPU().RunSingleFrame();
++    const long long ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
++                             std::chrono::steady_clock::now() - porpoise_from)
++                             .count();
++    Core::g_porpoise_cpu_ns.fetch_add(ns, std::memory_order_relaxed);
++    if (ns > Core::g_porpoise_cpu_max_ns.load(std::memory_order_relaxed))
++      Core::g_porpoise_cpu_max_ns.store(ns, std::memory_order_relaxed);
++    Core::g_porpoise_cpu_frames.fetch_add(1, std::memory_order_relaxed);
++    s_porpoise_single_core.store(true, std::memory_order_relaxed);
    }
 +  Libretro::Video::EndRun();
  
    RETRO_PERFORMANCE_STOP(dolphin_main_func);
  
-@@ -566,9 +705,13 @@ bool retro_unserialize(const void* data, size_t size)
+@@ -566,9 +787,13 @@ bool retro_unserialize(const void* data, size_t size)
    if (!was_cpu)
      Core::DeclareAsCPUThread();
  
@@ -4871,7 +6723,7 @@ index cd8753b666..ff2dfac043 100644
    }, true);
  
    if (!was_cpu)
-@@ -577,7 +720,7 @@ bool retro_unserialize(const void* data, size_t size)
+@@ -577,7 +802,7 @@ bool retro_unserialize(const void* data, size_t size)
    if (system.IsDualCoreMode())
      ar->SetPassthrough(false);
  
@@ -4880,7 +6732,7 @@ index cd8753b666..ff2dfac043 100644
  }
  
  unsigned retro_get_region()
-@@ -714,3 +857,90 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
+@@ -714,3 +939,172 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
    }, true);
  }
  } // extern "C"
@@ -4903,7 +6755,21 @@ index cd8753b666..ff2dfac043 100644
 +  if (!rips || !counts || n <= 0 || !Core::IsRunning(Core::System::GetInstance()))
 +    return;
 +  Core::System& system = Core::System::GetInstance();
-+  Core::CPUThreadGuard guard(system);
++  // The CPU thread is held only while the report is gathered; it is written
++  // after (a report written while held cost the game a quarter second).
++  std::optional<Core::CPUThreadGuard> held(std::in_place, system);
++  const Core::CPUThreadGuard& guard = *held;
++  std::string report;
++  const auto say = [&report](const char* format, auto... args) {
++    char line[512];
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wformat-nonliteral"
++#pragma clang diagnostic ignored "-Wformat-security"
++    const int length = std::snprintf(line, sizeof(line), format, args...);
++#pragma clang diagnostic pop
++    if (length > 0)
++      report.append(line, std::min<std::size_t>(std::size_t(length), sizeof(line) - 1));
++  };
 +  struct Hot
 +  {
 +    u32 address = 0, size = 0;
@@ -4913,41 +6779,61 @@ index cd8753b666..ff2dfac043 100644
 +  };
 +  std::vector<Hot> hot;
 +  unsigned outside = 0;
++  // Every block's host code once (near and far), sorted, then each address
++  // looked up in it: one pass over the blocks rather than one per address.
++  struct Span
++  {
++    const u8* begin;
++    const u8* end;
++    u32 address, size;
++    const u8* near_begin;
++    const u8* near_end;
++  };
++  std::vector<Span> spans;
++  system.GetJitInterface().RunOnBlocks(guard, [&](const JitBlock& b) {
++    if (b.near_end > b.near_begin)
++      spans.push_back({b.near_begin, b.near_end, b.effectiveAddress, b.originalSize, b.near_begin,
++                       b.near_end});
++    if (b.far_end > b.far_begin)
++      spans.push_back({b.far_begin, b.far_end, b.effectiveAddress, b.originalSize, b.near_begin,
++                       b.near_end});
++  });
++  std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) { return a.begin < b.begin; });
 +  for (int i = 0; i < n; ++i)
 +  {
 +    const u8* const rip = reinterpret_cast<const u8*>(static_cast<uintptr_t>(rips[i]));
-+    bool found = false;
-+    system.GetJitInterface().RunOnBlocks(guard, [&](const JitBlock& b) {
-+      if (found)
-+        return;
-+      if ((rip >= b.near_begin && rip < b.near_end) || (rip >= b.far_begin && rip < b.far_end))
-+      {
-+        found = true;
-+        for (Hot& h : hot)
-+          if (h.address == b.effectiveAddress)
-+          {
-+            h.samples += counts[i];
-+            return;
-+          }
-+        hot.push_back({b.effectiveAddress, b.originalSize, counts[i], b.near_begin, b.near_end});
-+      }
-+    });
-+    if (!found)
++    auto it = std::upper_bound(spans.begin(), spans.end(), rip,
++                               [](const u8* r, const Span& span) { return r < span.begin; });
++    if (it == spans.begin() || rip >= (it - 1)->end)
++    {
 +      outside += counts[i];
++      continue;
++    }
++    const Span& b = *(it - 1);
++    bool merged = false;
++    for (Hot& h : hot)
++      if (h.address == b.address)
++      {
++        h.samples += counts[i];
++        merged = true;
++        break;
++      }
++    if (!merged)
++      hot.push_back({b.address, b.size, counts[i], b.near_begin, b.near_end});
 +  }
 +  std::sort(hot.begin(), hot.end(), [](const Hot& a, const Hot& b) { return a.samples > b.samples; });
-+  std::fprintf(stderr, "jit: %zu hot blocks; %u samples outside any block\n", hot.size(), outside);
++  say("jit: %zu hot blocks; %u samples outside any block\n", hot.size(), outside);
 +  for (std::size_t k = 0; k < hot.size() && k < 8; ++k)
 +  {
 +    const Hot& h = hot[k];
-+    std::fprintf(stderr, "jit: block %08x, %u instructions, host %p..%p, samples %u\n", h.address,
++    say("jit: block %08x, %u instructions, host %p..%p, samples %u\n", h.address,
 +                 h.size, static_cast<const void*>(h.begin), static_cast<const void*>(h.end),
 +                 h.samples);
 +    for (u32 i = 0; i < h.size && i < 64; ++i)
 +    {
 +      const u32 at = h.address + i * 4;
 +      const u32 op = PowerPC::MMU::HostRead_Instruction(guard, at);
-+      std::fprintf(stderr, "jit:   %08x  %08x  %s\n", at, op,
++      say("jit:   %08x  %08x  %s\n", at, op,
 +                   Common::GekkoDisassembler::Disassemble(op, at).c_str());
 +    }
 +    /* 3.0: the block's own machine code, for reading offline (the two
@@ -4955,20 +6841,68 @@ index cd8753b666..ff2dfac043 100644
 +    if (k < 2 && h.begin && h.end > h.begin && h.end - h.begin < 16384)
 +      for (const u8* p = h.begin; p < h.end; p += 32)
 +      {
-+        std::fprintf(stderr, "jit: host %p ", static_cast<const void*>(p));
++        say("jit: host %p ", static_cast<const void*>(p));
 +        for (const u8* q = p; q < p + 32 && q < h.end; ++q)
-+          std::fprintf(stderr, "%02x", *q);
-+        std::fprintf(stderr, "\n");
++          say("%02x", *q);
++        say("\n");
 +      }
++  }
++  /* The whole game function around each of the three hottest blocks, once a
++   * session: from its stack-frame prologue (stwu r1) to the first blr after
++   * the block, so a hot routine can be read in full offline. */
++  {
++    static std::vector<u32> s_dumped;
++    for (std::size_t k = 0; k < hot.size() && k < 3; ++k)
++    {
++      const u32 at = hot[k].address;
++      u32 start = 0;
++      for (u32 back = 0; back < 0x1000 && at >= back * 4; ++back)
++      {
++        const u32 a = at - back * 4;
++        if (!PowerPC::MMU::HostIsInstructionRAMAddress(guard, a))
++          break;
++        if ((PowerPC::MMU::HostRead_Instruction(guard, a) & 0xFFFF8000u) == 0x94218000u)
++        {
++          start = a;
++          break;
++        }
++      }
++      if (!start)
++        start = at >= 0x400 ? at - 0x400 : at;
++      if (std::find(s_dumped.begin(), s_dumped.end(), start) != s_dumped.end())
++        continue;
++      s_dumped.push_back(start);
++      u32 end = start;
++      bool past = false;
++      for (u32 i = 0; i < 0x1000; ++i)
++      {
++        end = start + i * 4;
++        if (!PowerPC::MMU::HostIsInstructionRAMAddress(guard, end))
++          break;
++        if (end >= at)
++          past = true;
++        if (past && PowerPC::MMU::HostRead_Instruction(guard, end) == 0x4E800020u)
++          break;
++      }
++      say("jit: function %08x..%08x around block %08x\n", start, end, at);
++      for (u32 a = start; a <= end; a += 4)
++      {
++        const u32 op = PowerPC::MMU::HostRead_Instruction(guard, a);
++        say("jit:   f %08x  %08x  %s\n", a, op,
++                     Common::GekkoDisassembler::Disassemble(op, a).c_str());
++      }
++    }
 +  }
 +  /* The quantizers and the paired-single state the hot code runs with. */
 +  {
 +    const auto& ppc = system.GetPPCState();
-+    std::fprintf(stderr, "jit: gqr");
++    say("jit: gqr");
 +    for (int i = 0; i < 8; ++i)
-+      std::fprintf(stderr, " %08x", ppc.spr[SPR_GQR0 + i]);
-+    std::fprintf(stderr, " hid2 %08x msr %08x\n", ppc.spr[SPR_HID2], ppc.msr.Hex);
++      say(" %08x", ppc.spr[SPR_GQR0 + i]);
++    say(" hid2 %08x msr %08x\n", ppc.spr[SPR_HID2], ppc.msr.Hex);
 +  }
++  held.reset();
++  std::fputs(report.c_str(), stderr);
 +  std::fflush(stderr);
 +}
 diff --git a/Source/Core/DolphinLibretro/Video.cpp b/Source/Core/DolphinLibretro/Video.cpp
@@ -5111,6 +7045,49 @@ index 049d090a0d..8bb8b759d6 100644
                  0,
                  0,
                  static_cast<u32>((index + values.size()) * sizeof(BBoxType)),
+diff --git a/Source/Core/VideoBackends/Vulkan/CommandBufferManager.cpp b/Source/Core/VideoBackends/Vulkan/CommandBufferManager.cpp
+index c82417eb8c..36f96a6d51 100644
+--- a/Source/Core/VideoBackends/Vulkan/CommandBufferManager.cpp
++++ b/Source/Core/VideoBackends/Vulkan/CommandBufferManager.cpp
+@@ -3,6 +3,9 @@
+ 
+ #include "VideoBackends/Vulkan/CommandBufferManager.h"
+ 
++#include <atomic>
++#include <chrono>
++
+ #include <array>
+ #include <cstdint>
+ 
+@@ -15,6 +18,9 @@
+ 
+ namespace Vulkan
+ {
++#ifdef __LIBRETRO__
++std::atomic<long long> g_porpoise_gpu_wait_ns{0};
++#endif
+ CommandBufferManager::CommandBufferManager(bool use_threaded_submission)
+     : m_use_threaded_submission(use_threaded_submission)
+ {
+@@ -280,8 +286,18 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
+   }
+ 
+   // Wait for this command buffer to be completed.
++#ifdef __LIBRETRO__
++  // Porpoise: time spent waiting here is the PS5's GPU still busy (porpoise_perf_take2).
++  const auto porpoise_wait_from = std::chrono::steady_clock::now();
++#endif
+   VkResult res =
+       vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
++#ifdef __LIBRETRO__
++  g_porpoise_gpu_wait_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                                       std::chrono::steady_clock::now() - porpoise_wait_from)
++                                       .count(),
++                                   std::memory_order_relaxed);
++#endif
+   if (res != VK_SUCCESS)
+     LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
+ 
 diff --git a/Source/Core/VideoBackends/Vulkan/VKMain.cpp b/Source/Core/VideoBackends/Vulkan/VKMain.cpp
 index 6338e52e3d..10539c661e 100644
 --- a/Source/Core/VideoBackends/Vulkan/VKMain.cpp
@@ -5566,3 +7543,100 @@ index 95c2e83755..18ab44f05e 100644
  }
  
  void Presenter::ImmediateSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height)
+diff --git a/Source/Core/VideoCommon/ShaderCache.cpp b/Source/Core/VideoCommon/ShaderCache.cpp
+index 30d5c8afe0..49e17d5c7e 100644
+--- a/Source/Core/VideoCommon/ShaderCache.cpp
++++ b/Source/Core/VideoCommon/ShaderCache.cpp
+@@ -3,6 +3,9 @@
+ 
+ #include "VideoCommon/ShaderCache.h"
+ 
++#include <atomic>
++#include <chrono>
++
+ #include <utility>
+ 
+ #include <fmt/format.h>
+@@ -31,6 +34,10 @@ std::unique_ptr<VideoCommon::ShaderCache> g_shader_cache;
+ 
+ namespace VideoCommon
+ {
++#ifdef __LIBRETRO__
++std::atomic<long long> g_porpoise_shader_ns{0};
++std::atomic<unsigned> g_porpoise_shaders{0};
++#endif
+ ShaderCache::ShaderCache() : m_api_type{APIType::Nothing}
+ {
+ }
+@@ -129,8 +136,19 @@ const AbstractPipeline* ShaderCache::GetPipelineForUid(const GXPipelineUid& uid)
+   const bool exists_in_cache = it != m_gx_pipeline_cache.end();
+   std::unique_ptr<AbstractPipeline> pipeline;
+   std::optional<AbstractPipelineConfig> pipeline_config = GetGXPipelineConfig(uid);
++#ifdef __LIBRETRO__
++  // Porpoise: a shader made on the spot, the game waiting for it (porpoise_perf_take2).
++  const auto porpoise_from = std::chrono::steady_clock::now();
++#endif
+   if (pipeline_config)
+     pipeline = g_gfx->CreatePipeline(*pipeline_config);
++#ifdef __LIBRETRO__
++  g_porpoise_shader_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                                     std::chrono::steady_clock::now() - porpoise_from)
++                                     .count(),
++                                 std::memory_order_relaxed);
++  g_porpoise_shaders.fetch_add(1, std::memory_order_relaxed);
++#endif
+   if (g_ActiveConfig.bShaderCache && !exists_in_cache)
+     AppendGXPipelineUID(uid);
+   return InsertGXPipeline(uid, std::move(pipeline));
+@@ -161,8 +179,18 @@ const AbstractPipeline* ShaderCache::GetUberPipelineForUid(const GXUberPipelineU
+ 
+   std::unique_ptr<AbstractPipeline> pipeline;
+   std::optional<AbstractPipelineConfig> pipeline_config = GetGXPipelineConfig(uid);
++#ifdef __LIBRETRO__
++  const auto porpoise_from = std::chrono::steady_clock::now();
++#endif
+   if (pipeline_config)
+     pipeline = g_gfx->CreatePipeline(*pipeline_config);
++#ifdef __LIBRETRO__
++  g_porpoise_shader_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                                     std::chrono::steady_clock::now() - porpoise_from)
++                                     .count(),
++                                 std::memory_order_relaxed);
++  g_porpoise_shaders.fetch_add(1, std::memory_order_relaxed);
++#endif
+   return InsertGXUberPipeline(uid, std::move(pipeline));
+ }
+ 
+diff --git a/Source/Core/Core/HW/DVD/AMMediaboard.cpp b/Source/Core/Core/HW/DVD/AMMediaboard.cpp
+index 0f434dfcc0..5c772ba502 100644
+--- a/Source/Core/Core/HW/DVD/AMMediaboard.cpp
++++ b/Source/Core/Core/HW/DVD/AMMediaboard.cpp
+@@ -539,8 +539,18 @@ void Init()
+ 
+ void InitDIMM(const DiscIO::Volume& volume)
+ {
++#ifdef __PROSPERO__
++  // Porpoise (PS5): read from the disc itself. The copy in RAM would be an
++  // anonymous mapping the size of the disc, charged to the title's small
++  // flexible memory (a few hundred MiB), which a game's disc outgrows.
++  s_dimm_disc = volume.GetBlobReader().CopyReader();
++#else
+   // Load game into RAM, like on the actual Triforce.
+-  s_dimm_disc = DiscIO::CreateCachedBlobReader(volume.GetBlobReader().CopyReader());
++  std::unique_ptr<DiscIO::BlobReader> reader = volume.GetBlobReader().CopyReader();
++  s_dimm_disc = reader ? DiscIO::CreateCachedBlobReader(std::move(reader)) : nullptr;
++#endif
++  if (!s_dimm_disc)
++    ERROR_LOG_FMT(AMMEDIABOARD, "AM-BB: couldn't open the game's disc for the DIMM board");
+ }
+ 
+ static int PlatformPoll(std::span<WSAPOLLFD> pfds, std::chrono::milliseconds timeout)
+@@ -1868,7 +1878,7 @@ u32 ExecuteCommand(std::array<u32, 3>& dicmd_buf, u32* diimm_buf, u32 address, u
+       ERROR_LOG_FMT(AMMEDIABOARD, "GC-AM: Invalid DIMM Disc read from: offset={}, length={}",
+                     offset, length);
+     }
+-    else if (s_dimm_disc->Read(offset, length, span.data()))
++    else if (s_dimm_disc && s_dimm_disc->Read(offset, length, span.data()))
+     {
+       return 0;
+     }
