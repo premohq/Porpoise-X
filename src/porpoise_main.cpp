@@ -3328,8 +3328,8 @@ int main(int argc, char **argv)
         else
             g_app.start_welcome();
     }
-    else if (g_settings.setup_checked && !g_settings.welcome_45)
-        g_app.start_welcome(true); /* 4.5: a new look, offered once */
+    else if (g_settings.setup_checked && !g_settings.welcome_45 && !ecam_bridge::request.valid)
+        g_app.start_welcome(true); /* 4.5: a new look, offered once, not when PS5-ECAM starts it */
     if (porpoise::ui::look::kChannel != porpoise::ui::look::Channel::Release &&
         g_settings.testing_notice != porpoise::ui::look::kNoticeId)
         g_app.show_testing_notice(); /* after anything below */
