@@ -119,6 +119,8 @@ struct GfxInit
     PFN_vkGetDeviceProcAddr get_device_proc = nullptr;
     std::mutex *queue_mutex = nullptr; /* held around this renderer's own submits */
     std::string asset_dir;             /* fonts/ and brand/ live here */
+    /* Playtendoh's Lexend, for its screens, where the weights are: "" Porpoise's own. */
+    std::string ui_font_dir;
     std::string cache_dir;             /* the baked text atlases are kept here, if set */
     /* Japanese, Chinese or Korean: the font in fonts/ the menus fall back to
      * beyond Nunito, and characters to take from the other such fonts when it
@@ -177,6 +179,7 @@ class Gfx
 {
 public:
     bool init(const GfxInit &init);
+    long long init_pipeline_ms = 0, init_fonts_ms = 0; /* what init() took, for the start's trace */
     void shutdown();
     bool ready() const { return device_ != VK_NULL_HANDLE; }
     /* After the menus' language changes: GfxInit's cjk_font and cjk_also
@@ -237,6 +240,9 @@ public:
      * alone. begin() turns it off; screens drawn for the light look keep it
      * off. */
     void set_tone(bool light) { tone_ = light; }
+    /* What's drawn from here keeps between these heights (design pixels); clear_clip: everywhere. */
+    void set_clip(float top, float bottom);
+    void clear_clip();
     /* On top of set_layer, for the whole frame: the menus' entrance. Not the
      * background. begin() resets it. */
     void set_intro(float fade, float dy)
@@ -278,6 +284,8 @@ public:
                Color border = {}, float border_w = 0, float glow = 0, float sheen = 0);
     void image(Texture *t, float x, float y, float w, float h, Color tint = {}, float radius = 0);
     void blob(float cx, float cy, float w, float h, Color c);
+    void line(float x0, float y0, float x1, float y1, float thick, Color c); /* soft-edged, any angle */
+    void panel_across(float x, float y, float w, float h, Color left, Color right); /* a plain fill, left to right */
     void glyph(Glyph g, float cx, float cy, float size, Color c, float rotation = 0);
     /* A button icon in a size x size cell (the icons carry their own margin:
      * a face button's ring is about two thirds of the cell). */
@@ -343,6 +351,7 @@ private:
     {
         VkDescriptorSet set;
         std::uint32_t first, count;
+        VkRect2D scissor;
     };
     struct GlyphInfo
     {
@@ -482,6 +491,7 @@ private:
     bool reduced_motion_ = false;
     std::vector<Vertex> vertices_;
     std::vector<Batch> batches_;
+    VkRect2D clip_{};
     bool overflowed_ = false;
 public:
     std::size_t quads() const { return vertices_.size() / 6; } /* drawn so far this frame */

@@ -986,8 +986,19 @@ bool read_gba(Slot &slot, std::uint32_t raw, const PadSample &sample, State &nex
     const GbaConfig &g_gba_ = g_gba[index];
     if (g_gba_.direct != late)
         return false;
-    const bool held = g_gba_.direct || (g_gba_.modifier >= 0 && g_gba_.modifier < CtlCount &&
-                                        (raw & kControlPadBit[g_gba_.modifier]));
+    bool held = g_gba_.direct || (g_gba_.modifier >= 0 && g_gba_.modifier < CtlCount &&
+                                  (raw & kControlPadBit[g_gba_.modifier]));
+    if (g_gba_.toggle && !g_gba_.direct)
+    {
+        /* Each press of the GBA button turns it on or off. */
+        static bool s_on[kMaxPlayers], s_was[kMaxPlayers];
+        if (!g_gba_.active)
+            s_on[index] = false;
+        else if (held && !s_was[index])
+            s_on[index] = !s_on[index];
+        s_was[index] = held;
+        held = s_on[index];
+    }
     if (!g_gba_.active || !held)
         return false;
     next.connected = true;

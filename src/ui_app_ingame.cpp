@@ -19,6 +19,7 @@
  * Changes are saved as the game's own settings and take effect at once
  * (main applies them as take_menu_change() reports them). */
 #include <algorithm>
+#include <utility>
 #include <cctype>
 #include <dirent.h>
 #include <cstring>
@@ -31,6 +32,7 @@
 #include "porpoise_core.hpp"
 #include "porpoise_pad.hpp"
 #include "porpoise_states.hpp"
+#include "ecam_bridge.h"
 #include "ui_app.hpp"
 #include "porpoise_gfxmods.hpp"
 #include "ui_app_common.hpp"
@@ -125,6 +127,11 @@ std::string gba_state_path(const Settings &p, int port, int slot)
 {
     return gba_exports(port) + "/" + gba_stem(p, port) + ".ss" + std::to_string(std::clamp(slot, 1, 9));
 }
+
+/* The sheet's own "tabs" past Porpoise's, and Achievements (kTabCount): the GBA's rows, and all the Game tab's */
+constexpr int kEcGba = kTabCount + 1, kEcAll = kTabCount + 2;
+/* Rows of the list on their own, under the categories */
+constexpr int kEcFast = kTabCount + 3, kEcDisc = kTabCount + 4, kEcRestart = kTabCount + 5, kEcVolume = kTabCount + 6;
 
 /* What a row does. */
 enum class Kind
@@ -266,7 +273,8 @@ std::vector<Row> rows_for(int tab, Settings &p, bool wii = false, const Patches 
                 r.push_back({Kind::GbaCard, "", "Scan e-Reader Card"});
         }
         r.push_back({Kind::Library, "", "Quit to Library", nullptr, nullptr, 0, {}, true});
-        r.push_back({Kind::Home, "", "Close Porpoise"});
+        if (!ecam_bridge::request.valid) /* started by PS5-ECAM, Quit to Library goes back to it already */
+            r.push_back({Kind::Home, "", "Close Porpoise"});
         break;
     case kTabVideo:
         r.push_back({Kind::Int, "resolution", "Internal Resolution", &p.resolution, nullptr, 1,
@@ -325,11 +333,6 @@ std::vector<Row> rows_for(int tab, Settings &p, bool wii = false, const Patches 
                     r[i].child = true;
             }
         }
-        r.push_back({Kind::Int, "bloom", "Extra Bloom", &p.bloom, nullptr, 0, {"Off", "Low", "Medium", "High"}});
-        r.push_back({Kind::Int, "color_saturation", "Saturation", &p.color_saturation, nullptr, 0, kAdjust});
-        r.push_back({Kind::Int, "color_contrast", "Contrast", &p.color_contrast, nullptr, 0, kAdjust});
-        r.push_back({Kind::Int, "color_warmth", "Warmth", &p.color_warmth, nullptr, 0, kAdjust});
-        r.push_back({Kind::Border, "border", "Border"});
         r.push_back({Kind::Bool, "fps_overlay", "FPS Counter", nullptr, &p.fps_overlay, 0, {"Off", "On"}});
         if (!wii_game && p.gba_port() >= 0)
         {
@@ -660,6 +663,84 @@ std::string slot_date(long long t)
     std::strftime(buf, sizeof buf, "%Y-%m-%d  %H:%M", &tm);
     return buf;
 }
+/* A GBA's row, wherever Porpoise's tabs have it. */
+bool is_gba_row(const Row &r)
+{
+    switch (r.kind)
+    {
+    case Kind::GbaReset:
+    case Kind::GbaPick:
+    case Kind::GbaLink:
+    case Kind::GbaRom:
+    case Kind::GbaSlot:
+    case Kind::GbaDo:
+    case Kind::GbaImport:
+    case Kind::GbaCard:
+        return true;
+    default:
+        return r.key && std::strncmp(r.key, "gba_", 4) == 0;
+    }
+}
+
+/* Under Playtendoh the rows of a category: its Game without what the tiles and Quit do, every GBA row in one
+ * category of its own. Standalone, Porpoise's tabs as they are. */
+std::vector<Row> sheet_rows(int tab, Settings &p, bool wii, const Patches *patches)
+{
+    if (!ecam_bridge::request.valid)
+        return rows_for(tab, p, wii, patches);
+    if (tab == kEcAll)
+        return rows_for(kTabGame, p, wii, patches);
+    std::vector<Row> out;
+    if (tab == kEcVolume)
+    {
+        for (const Row &r : rows_for(kTabAudio, p, wii, patches))
+            if (r.key == std::string("volume"))
+                out.push_back(r);
+        return out;
+    }
+    if (tab == kEcGba)
+    {
+        for (const int from : {int(kTabGame), int(kTabVideo), int(kTabAudio)})
+            for (const Row &r : rows_for(from, p, wii, patches))
+                if (is_gba_row(r))
+                {
+                    out.push_back(r);
+                    out.back().gap_before = false;
+                }
+        return out;
+    }
+    for (const Row &r : rows_for(tab, p, wii, patches))
+    {
+        if (is_gba_row(r) || (tab == kTabAudio && r.key == std::string("volume")) || (tab == kTabGame && (r.kind == Kind::Resume || r.kind == Kind::Save || r.kind == Kind::Load ||
+                                                  r.kind == Kind::Shot || r.kind == Kind::Library)))
+            continue;
+        out.push_back(r);
+    }
+    return out;
+}
+
+std::vector<int> sheet_categories(Settings &p, bool wii, int tabs)
+{
+    std::vector<int> cats;
+    for (int i = 0; i < kTabCount; ++i)
+        if (i != kTabGame)
+        {
+            cats.push_back(i);
+            if (i == kTabGraphics) /* as the Wii U's: the volume on its own, its slider at once */
+                cats.push_back(kEcVolume);
+        }
+    Patches none;
+    if (!sheet_rows(kEcGba, p, wii, &none).empty())
+        cats.push_back(kEcGba);
+    if (tabs > kTabCount)
+        cats.push_back(kTabCount);
+    cats.push_back(kEcFast);
+    for (const Row &r : rows_for(kTabGame, p, wii, &none))
+        if (r.kind == Kind::Disc)
+            cats.push_back(kEcDisc);
+    cats.push_back(kEcRestart);
+    return cats;
+}
 } // namespace
 
 /* ---- save-state slots ------------------------------------------------------------------- */
@@ -769,6 +850,13 @@ void App::open_game_menu(Game *game, Settings *play)
     menu_prompt_ = 0;
     menu_row_ = 0;
     menu_tab_ = kTabGame;
+    ec_open_ = false;
+    ec_shown_ = -1;
+    ec_on_tiles_ = true;
+    ec_tile_ = 0;
+    ec_cat_ = 0;
+    ec_scroll_ = ec_scroll_target_ = 0;
+    ec_ring_ok_ = false;
     menu_anim_ = 0;
     menu_closing_ = false;
     menu_answer_ = 0;
@@ -957,9 +1045,185 @@ int App::update_game_menu(const Input &in, double dt)
 
     /* L1 / R1: the tabs (Achievements last, when the game has a set). */
     const int tabs = kTabCount + (menu_has_achievements() ? 1 : 0);
-    if (menu_tab_ >= tabs)
+    if (menu_tab_ >= tabs && !(ecam_ && menu_tab_ >= kEcGba))
         menu_tab_ = kTabGame;
-    if (!menu_prompt_ && (pressed(BtnL1) || pressed(BtnR1)))
+    /* Under Playtendoh: its sheet's way. Quick tiles, then one list: categories, the open one's rows under it,
+     * Up and Down going through them all, and Cross on another category opening that one instead. */
+    if (ecam_ && !menu_prompt_)
+    {
+        /* The categories (the GBA's when this game has one, Achievements when it has a set), then Quit. */
+        const bool wii_game = menu_game_ && menu_game_->platform == "Wii";
+        const std::vector<int> cat_tabs = sheet_categories(menu_draft_, wii_game, tabs);
+        const int cats = int(cat_tabs.size()) + 1;
+        if (ec_open_)
+        {
+            /* In the open category's rows. Its ends lead out to the list. */
+            Patches none;
+            none.cheats = &menu_cheats_;
+            const int count = menu_tab_ != kTabCount ? int(sheet_rows(menu_tab_, menu_draft_, menu_game_ && menu_game_->platform == "Wii", &none).size()) : 0;
+            /* (Achievements has its own list: Up and Down are its, and only Circle or Left leave it) */
+            const int ach_last = int(ach_.list.size()) - 1;
+            if (pressed(BtnCircle) || (menu_tab_ != kTabCount && ((up && menu_row_ == 0) || (down && menu_row_ >= count - 1))) ||
+                (menu_tab_ == kTabCount && (up && ach_focus_ <= 0 || down && ach_focus_ >= ach_last)))
+            {
+                const bool closing = pressed(BtnCircle);
+                ec_open_ = false;
+                ec_cat_ = down && !closing ? ec_shown_ + 1 : ec_shown_;
+                if (closing)
+                {
+                    ec_shown_ = -1;
+                    menu_tab_ = kTabGame;
+                }
+                menu_confirm_ = false;
+                sfx(closing ? Sound::MovingTab : Sound::MenuScroll);
+                return 0;
+            }
+        }
+        else
+        {
+            /* A tile's or Quit's row of the Game category, as if chosen there. */
+            const auto choose = [&](Kind kind) {
+                menu_tab_ = kEcAll;
+                ec_shown_ = -1;
+                Patches none;
+                none.cheats = &menu_cheats_;
+                const std::vector<Row> game = rows_for(kTabGame, menu_draft_, menu_game_ && menu_game_->platform == "Wii", &none);
+                for (std::size_t i = 0; i < game.size(); ++i)
+                    if (game[i].kind == kind)
+                        menu_row_ = int(i);
+            };
+            bool chosen = false;
+            if (up || down)
+            {
+                menu_restart_armed_ = false;
+                Patches none;
+                none.cheats = &menu_cheats_;
+                const int shown_tab = ec_shown_ >= 0 && ec_shown_ < int(cat_tabs.size()) ? cat_tabs[std::size_t(ec_shown_)] : kTabCount;
+                const int shown_rows = ec_shown_ < 0 || ec_shown_ >= int(cat_tabs.size()) ? 0
+                                       : shown_tab == kTabCount ? int(ach_.list.size())
+                                                                : int(sheet_rows(shown_tab, menu_draft_, wii_game, &none).size());
+                ec_hold_ = -1;
+                if (ec_on_tiles_)
+                {
+                    ec_on_tiles_ = false;
+                    ec_cat_ = down ? 0 : cats - 1;
+                }
+                else if (down && ec_cat_ == ec_shown_ && shown_rows > 0)
+                {
+                    menu_tab_ = shown_tab;
+                    menu_row_ = 0;
+                    ach_focus_ = 0;
+                    ec_open_ = true;
+                }
+                else if (up && ec_cat_ == ec_shown_ + 1 && ec_shown_ >= 0 && shown_rows > 0)
+                {
+                    menu_tab_ = shown_tab;
+                    menu_row_ = shown_rows - 1;
+                    ach_focus_ = shown_rows - 1;
+                    ec_open_ = true;
+                }
+                else if ((up && ec_cat_ == 0) || (down && ec_cat_ == cats - 1))
+                    ec_on_tiles_ = true;
+                else
+                    ec_cat_ += down ? 1 : -1;
+                sfx(Sound::MenuScroll);
+                return 0;
+            }
+            if (ec_on_tiles_)
+            {
+                if (left || right)
+                {
+                    ec_tile_ = std::clamp(ec_tile_ + (right ? 1 : -1), 0, 3);
+                    sfx(Sound::MenuScroll);
+                }
+                if (pressed(BtnCross))
+                {
+                    static constexpr Kind kTiles[4] = {Kind::Resume, Kind::Save, Kind::Load, Kind::Shot};
+                    choose(kTiles[ec_tile_]);
+                    chosen = true;
+                }
+            }
+            else if (ec_cat_ == cats - 1)
+            {
+                /* Held, as Playtendoh's: what isn't saved goes with it */
+                if (pressed(BtnCross))
+                    ec_hold_ = time_;
+                else if (!(held_ & BtnCross))
+                    ec_hold_ = -1;
+                if (ec_hold_ >= 0 && time_ - ec_hold_ >= 0.6)
+                {
+                    ec_hold_ = -1;
+                    ec_quit_held_ = true;
+                    choose(Kind::Library);
+                    chosen = true;
+                }
+            }
+            else if (cat_tabs[std::size_t(ec_cat_)] >= kEcFast)
+            {
+                /* A row of its own: it acts as it would among the others. */
+                const int plain = cat_tabs[std::size_t(ec_cat_)];
+                if (plain == kEcVolume)
+                {
+                    if (right || left)
+                    {
+                        ec_shown_ = -1;
+                        menu_tab_ = kEcVolume;
+                        menu_row_ = 0;
+                        chosen = true;
+                    }
+                }
+                else if (plain == kEcRestart)
+                {
+                    /* Held, as Quit: what isn't saved goes with it */
+                    if (pressed(BtnCross))
+                        ec_hold_ = time_;
+                    else if (!(held_ & BtnCross))
+                        ec_hold_ = -1;
+                    if (ec_hold_ >= 0 && time_ - ec_hold_ >= 0.6)
+                    {
+                        ec_hold_ = -1;
+                        ec_quit_held_ = true;
+                        menu_restart_armed_ = true;
+                        choose(Kind::Restart);
+                        chosen = true;
+                    }
+                }
+                else if (pressed(BtnCross) || right || left)
+                {
+                    choose(plain == kEcFast ? Kind::FastForward : Kind::Disc);
+                    chosen = true;
+                }
+            }
+            else if (pressed(BtnCross) || right || left)
+            {
+                /* Open it, closing the one that was; on it, or Left: closed. */
+                const bool opening = ec_shown_ != ec_cat_ && !left;
+                ec_shown_ = opening ? ec_cat_ : -1;
+                if (opening)
+                {
+                    menu_tab_ = cat_tabs[std::size_t(ec_cat_)];
+                    menu_row_ = 0;
+                }
+                else
+                    menu_tab_ = kTabGame;
+                sfx(Sound::DetailsFlip);
+                return 0;
+            }
+            /* Circle closes what's open before it leaves the menu. */
+            if (pressed(BtnCircle) && ec_shown_ >= 0)
+            {
+                ec_shown_ = -1;
+                menu_tab_ = kTabGame;
+                sfx(Sound::MovingTab);
+                return 0;
+            }
+            /* Otherwise only the ways out: nothing else acts on a row from here. */
+            if (!chosen && !pressed(BtnCircle) && !pressed(BtnSquare) &&
+                !((held_ & (BtnOptions | BtnTouch)) == (BtnOptions | BtnTouch) && (prev_ & (BtnOptions | BtnTouch)) != (BtnOptions | BtnTouch)))
+                return 0;
+        }
+    }
+    else if (!menu_prompt_ && (pressed(BtnL1) || pressed(BtnR1)))
     {
         menu_tab_ = (menu_tab_ + (pressed(BtnL1) ? tabs - 1 : 1)) % tabs;
         menu_row_ = 0;
@@ -1001,7 +1265,7 @@ int App::update_game_menu(const Input &in, double dt)
     patches.cheats = &menu_cheats_;
     g_menu_game_id = menu_game_ ? menu_game_->id : std::string();
     g_menu_gba_dir = data_dir_ + "/games/gba";
-    std::vector<Row> rows = rows_for(menu_tab_, p, menu_game_ && menu_game_->platform == "Wii", &patches);
+    std::vector<Row> rows = sheet_rows(menu_tab_, p, menu_game_ && menu_game_->platform == "Wii", &patches);
     const int count = int(rows.size());
     if (menu_prompt_)
         up = down = false; /* the question is answered first */
@@ -1125,7 +1389,7 @@ int App::update_game_menu(const Input &in, double dt)
         return leave(1);
 
     const Row &row = rows[std::size_t(menu_row_)];
-    const bool cross = pressed(BtnCross);
+    const bool cross = pressed(BtnCross) || std::exchange(ec_quit_held_, false);
     const int dir = left ? -1 : (right || cross) ? 1 : 0;
     std::string key;
     switch (row.kind)
@@ -1665,6 +1929,11 @@ void App::draw_controller_lines(float x, float y, float w, const Mapping &m)
     draw_group(kEndRStick, {{Icon::RStick, -1, tr("C-Stick")}, {Icon::R3, CtlR3, ""}});
 }
 
+bool App::wii_side_colour() const
+{
+    return menu_game_ && menu_game_->platform == "Wii";
+}
+
 void App::draw_game_menu(double time)
 {
     apply_look();
@@ -1711,18 +1980,22 @@ void App::draw_game_menu(double time)
     const std::vector<std::string> waiting = menu_draft_.changed_keys(*menu_play_);
     const Color kPending = rgba(0xFFC857);
     g.set_layer();
-    g.panel(0, 0, 1920, 1080, rgba(0x02040C, 0.55f * t), 1, 0);
+    if (ecam_)
+        g.panel_across(0, 0, 1920, 1080, rgba(0x05070D, (208.0f / 255.0f) * t), rgba(0x05070D, (88.0f / 255.0f) * t));
+    else
+        g.panel(0, 0, 1920, 1080, rgba(0x03050A, 0.55f * t), 1, 0);
 
-    /* The panel slides in from the left (the Porpoise look: from the right,
-     * as its menu does). */
-    /* 4.5: every theme's in-game menu is its side menu, over the game - the
-     * same place and size, its rows and words - in the theme's own colors
-     * (glass_pill, skin_select). */
-    const bool gl = true;
-    const float w = gl ? 720.0f : 880.0f, x = gl ? 1892.0f - w : 40.0f, y = gl ? 28.0f : 40.0f, h = gl ? 1024.0f : 1000.0f;
-    const float slide = (gl ? 1.0f : -1.0f) * (w + 80) * (1.0f - t);
+    /* The panel slides in. Playtendoh's sheet (its app/side_menu.h): from the left, where it is, how wide,
+     * near-black under a fine edge, in the side's colour. 4.5's every other look: its side menu, on the right,
+     * the same place and size, in the theme's own colors (glass_pill, skin_select). */
+    const bool gl = !ecam_;
+    const float w = ecam_ ? 640.0f : 720.0f, x = ecam_ ? 48.0f : 1892.0f - w, y = ecam_ ? 48.0f : 28.0f, h = ecam_ ? 984.0f : 1024.0f;
+    const float slide = (ecam_ ? -1.0f : 1.0f) * (w + 80) * (1.0f - t);
+    const Color kAccent = rgba(wii_side_colour() ? 0x3FCFF0 : 0x6F6CFF);
     g.set_layer(slide, 0, 0.3f + 0.7f * t);
-    if (gl)
+    if (ecam_)
+        g.panel(x, y, w, h, rgba(0x0A0F1B, 235.0f / 255.0f), 1, 28, rgba(0xFFFFFF, 26.0f / 255.0f), 1);
+    else if (gl)
         glass_pill(x, y, w, h, 30, 1.15f);
     else
     {
@@ -1736,9 +2009,41 @@ void App::draw_game_menu(double time)
         glass_block(g, x + w * 0.5f, y + h * 0.5f, w, h, 22, 0, 0, 36, face);
     }
 
-    /* Header: the game's cover and name. */
+    /* Playtendoh's header: the cover in its box, the name, the system's and Running's chips. */
     float hy = y + 34;
-    if (menu_game_)
+    if (ecam_ && menu_game_)
+    {
+        Texture *cover = cover_of(*menu_game_);
+        const float box = 112, cx = 84, cy = 84;
+        float cw = box * 0.75f, ch = box;
+        if (cover && cover->height > 0)
+        {
+            const float fit_k = std::min(box / float(cover->width), box / float(cover->height));
+            cw = float(cover->width) * fit_k;
+            ch = float(cover->height) * fit_k;
+            g.panel(cx, cy + 10, cw, ch + 4, rgba(0x000000, 80.0f / 255.0f), 1, 14);
+            g.image(cover, cx, cy, cw, ch, kWhite, 14);
+            g.panel(cx, cy, cw, ch, kClear, 1, 14, rgba(0xFFFFFF, 26.0f / 255.0f), 1);
+        }
+        else
+            g.panel(cx, cy, cw, ch, rgba(0xFFFFFF, 0.055f), 1, 14, rgba(0xFFFFFF, 0.10f), 1);
+        const float tx = cx + cw + 24, tw = x + w - 36 - tx;
+        const Color text = rgba(0xF5F7FB);
+        g.text_mid(Font::SemiBold, 32, tx, cy + 18, text, Align::Left, fit(g, Font::SemiBold, 32, menu_game_->title, tw));
+        const std::string sys = menu_game_->platform == "Wii" ? "WII" : "GAMECUBE";
+        const float chip = 24 + 22 + g.measure(Font::SemiBold, 18, sys) + 1.5f * float(sys.size());
+        g.panel(tx, cy + 50, chip, 34, with_alpha(kAccent, 0.16f), 1, 10);
+        g.panel(tx + 12, cy + 60, 14, 14, kAccent, 1, 4);
+        g.text_mid(Font::SemiBold, 18, tx + 34, cy + 67, kAccent, Align::Left, sys, 1.5f);
+        const std::string running = tr("RUNNING");
+        const float chip2 = 24 + g.measure(Font::SemiBold, 18, running) + 1.5f * float(running.size());
+        g.panel(tx + chip + 8, cy + 50, chip2, 34, rgba(0xFFFFFF, 22.0f / 255.0f), 1, 10);
+        g.text_mid(Font::SemiBold, 18, tx + chip + 20, cy + 67, rgba(0xF5F7FB, 179.0f / 255.0f), Align::Left, running, 1.5f);
+        if (!ecam_details_.empty())
+            g.text_mid(Font::Regular, 20, tx, cy + 102, rgba(0xF5F7FB, 117.0f / 255.0f), Align::Left, fit(g, Font::Regular, 20, ecam_details_, tw));
+        hy = 224;
+    }
+    if (!ecam_ && menu_game_)
     {
         Texture *cover = cover_of(*menu_game_);
         float cw = gl ? 64.0f : 84.0f, ch = gl ? 90.0f : 118.0f;
@@ -1795,6 +2100,7 @@ void App::draw_game_menu(double time)
 
     /* The tabs, L1 and R1 at their sides. */
     const int tabs = kTabCount + (menu_has_achievements() ? 1 : 0);
+    if (!ecam_)
     {
         const float ty = hy + 28, tab_h = 50;
         float size = gl ? ts(19) : tabs > kTabCount ? ts(22) : ts(24);
@@ -1843,10 +2149,13 @@ void App::draw_game_menu(double time)
         }
         hy = ty + tab_h * 0.5f + 16;
     }
-    g.panel(x + 36, hy, w - 72, gl ? 1.0f : 1.5f, gl ? rgba(0xFFFFFF, 0.16f) : rgba(0x6F8FE0, 0.5f), 1, 0);
-    hy += 10;
+    if (!ecam_)
+    {
+        g.panel(x + 36, hy, w - 72, gl ? 1.0f : 1.5f, gl ? rgba(0xFFFFFF, 0.16f) : rgba(0x6F8FE0, 0.5f), 1, 0);
+        hy += 10;
+    }
 
-    if (menu_tab_ == kTabCount && tabs > kTabCount)
+    if (menu_tab_ == kTabCount && tabs > kTabCount && !ecam_)
     {
         /* Achievements: the list here, the one in focus beside the menu. */
         draw_achievement_list(x + 48, hy + 18, w - 96, y + h - 84 - (hy + 18));
@@ -1862,7 +2171,7 @@ void App::draw_game_menu(double time)
             px += 42;
             px += g.text_mid(Font::SemiBold, size, px, py, kWhite, Align::Left, pr.second) + 40;
         }
-        const std::string tabs_label = tr("Tabs");
+        const std::string tabs_label = ecam_ ? std::string() : tr("Tabs");
         const float tw = g.measure(Font::SemiBold, size, tabs_label), right = x + w - 48;
         if (!gl)
             g.text_mid(Font::SemiBold, size, right, py, kWhite, Align::Right, tabs_label);
@@ -1881,68 +2190,14 @@ void App::draw_game_menu(double time)
     const bool wii = menu_game_ && menu_game_->platform == "Wii";
     g_menu_game_id = menu_game_ ? menu_game_->id : std::string();
     g_menu_gba_dir = data_dir_ + "/games/gba";
-    const std::vector<Row> rows = rows_for(menu_tab_, p, wii, &patches);
-    if (rows.empty())
+    const std::vector<Row> rows = sheet_rows(menu_tab_, p, wii, &patches);
+    if (rows.empty() && !ecam_)
     {
         g.set_layer();
         return;
     }
-    const float row_h = gl ? 50.0f : 56.0f, rx = x + 24, rw = w - 48;
-    float ry = hy;
-    /* A long tab (Patches; Graphics or Controls with a game's extra rows): a
-     * window on its rows, around the focus. */
-    int first = 0, last = int(rows.size());
-    {
-        /* What's below the rows keeps its room: the Game tab's three slots
-         * (with the help line and the prompts, ~300), Patches' longer help. */
-        const float reserve = menu_tab_ == kTabGame ? (gl ? 270.0f : 330.0f) : menu_tab_ == kTabPatches ? 200.0f : 150.0f;
-        const int visible = std::max(3, int((y + h - reserve - hy) / row_h));
-        if (last > visible)
-        {
-            first = std::clamp(menu_row_ - visible / 2, 0, last - visible);
-            last = first + visible;
-        }
-        if (first > 0)
-            g.glyph(Glyph::Arrow, x + w * 0.5f, hy - 2, 14, kCyan, 0.0f);
-    }
-    for (int i = first; i < last; ++i)
-    {
-        const Row &row = rows[std::size_t(i)];
-        if (row.gap_before && i > first)
-        {
-            g.panel(x + 36, ry + 6, w - 72, gl ? 1.0f : 1.5f, gl ? rgba(0xFFFFFF, 0.16f) : rgba(0x6F8FE0, 0.5f), 1, 0);
-            ry += 14;
-        }
-        const float cy = ry + row_h * 0.5f;
-        const bool on = i == menu_row_;
-        if (row.kind != Kind::Info)
-            mp_hit(rx + slide, ry, rw, row_h, kMpRow + i);
-        if (on && gl)
-            skin_select(rx, ry + 3, rw, row_h - 6, (row_h - 6) * 0.5f, 1.0f);
-        else if (on)
-            g.panel(rx, ry + 4, rw, row_h - 8, rgba(0x1D45B8, 0.9f), 0.7f, kR, kIcy, 2.2f, 8, 0.18f);
-        const float indent = row.child ? 26.0f : 0.0f;
-        const float label_size = gl ? (row.child ? ts(21) : ts(23)) : ts(27), value_size = gl ? ts(21) : ts(25);
-        const std::string label = row.label ? tr(row.label) : row.text;
-        bool row_waiting = false;
-        if (row.key && *row.key)
-            row_waiting = std::find(waiting.begin(), waiting.end(), std::string(row.key)) != waiting.end() ||
-                          (std::string(row.key) == "audio_preset" &&
-                           std::find_if(waiting.begin(), waiting.end(), [](const std::string &k) {
-                               return k.rfind("audio_", 0) == 0;
-                           }) != waiting.end());
-        if (row.kind == Kind::Cheat && row.index >= 0 && row.index < int(menu_cheats_.size()))
-        {
-            const Cheat &c = menu_cheats_[std::size_t(row.index)];
-            for (const std::string &k : {cheat_key(c, true), cheat_key(c, false)})
-                row_waiting |= std::find(waiting.begin(), waiting.end(), k) != waiting.end();
-        }
-        if (row_waiting)
-            g.panel(rx + 8, cy - 6, 12, 12, kPending, 1, 6); /* changed, not applied yet */
-        g.text_mid(on ? Font::Bold : Font::SemiBold, label_size, rx + 28 + indent, cy, on ? kWhite : kSoft, Align::Left,
-                   row.label ? label : fit(g, on ? Font::Bold : Font::SemiBold, label_size, label, rw * 0.62f));
-        std::string value;
-        bool arrows = true;
+    /* What a row shows beside its label, and whether Left and Right change it. */
+    const auto row_value = [&](const Row &row, std::string &value, bool &arrows) {
         switch (row.kind)
         {
         case Kind::Info:
@@ -2059,19 +2314,529 @@ void App::draw_game_menu(double time)
                 if (b.name == p.border)
                     value = b.built_in ? tr(b.label) : b.label;
             break;
-        case Kind::Group:
-        {
-            /* Open or shut: a chevron, pointing down when open. */
-            const bool open = g_group_open[std::clamp(row.index, 0, kGroupCount - 1)];
-            g.glyph(Glyph::Arrow, rx + rw - 30, cy, 15, on ? kWhite : kSoft, open ? kPi : kPi * 0.5f);
+        case Kind::Group: /* (drawn by the list: a chevron) */
             arrows = false;
-            ry += row_h;
-            continue;
-        }
+            break;
         default:
             arrows = false;
             break;
         }
+    };
+    if (ecam_)
+    {
+    const float kInset = 84, kInner = 568, kTilesTop = 224, kTileH = 120, kGap = 12, kRowH = 56, kPitch = 62;
+    const float list_top = kTilesTop + kTileH + 24, list_bottom = y + h - 150;
+    const double dt = std::clamp(time - ec_time_, 0.0, 0.1);
+    ec_time_ = time;
+    float ring[4] = {0, 0, 0, 0};
+    /* menu_canvas.h's Side(): the same values, its 0-255 alphas as they are */
+    const Color text_c = rgba(0xF5F7FB), copy = rgba(0xF5F7FB, 179.0f / 255.0f), faint = rgba(0xF5F7FB, 117.0f / 255.0f),
+                row_fill = rgba(0xFFFFFF, 14.0f / 255.0f), focus_fill = rgba(0xFFFFFF, 22.0f / 255.0f), edge = rgba(0xFFFFFF, 26.0f / 255.0f);
+    /* Its Chevron: two thin strokes. point: 0 right, 1 left, 2 down */
+    const auto chevron = [&](float cx_, float cy_, Color c, int point) {
+        const float r = 6, thick = 2.2f;
+        if (point == 2)
+        {
+            g.line(cx_ - r, cy_ - r / 2, cx_, cy_ + r / 2, thick, c);
+            g.line(cx_, cy_ + r / 2, cx_ + r, cy_ - r / 2, thick, c);
+            return;
+        }
+        const float side = point == 1 ? -1.0f : 1.0f;
+        g.line(cx_ - side * r / 2, cy_ - r, cx_ + side * r / 2, cy_, thick, c);
+        g.line(cx_ + side * r / 2, cy_, cx_ - side * r / 2, cy_ + r, thick, c);
+    };
+
+    /* The tiles. */
+    {
+        static const char *const kNames[4] = {"Resume", "Save State", "Load State", "Screenshot"};
+        const float tw = (kInner - kGap * 3) / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            const float tx = kInset + float(i) * (tw + kGap);
+            const bool on = !ec_open_ && ec_on_tiles_ && i == ec_tile_;
+            g.panel(tx, kTilesTop, tw, kTileH, on ? focus_fill : row_fill, 1, 20, on ? kClear : edge, on ? 0 : 1);
+            /* Its icon, drawn as Playtendoh's menu_canvas.h has them, its name under it. */
+            const Color ink = on ? text_c : copy;
+            const float ix = tx + tw * 0.5f, iy = kTilesTop + 42, th_ = 2.4f;
+            if (i == 0)
+                g.glyph(Glyph::Arrow, ix, iy, 22, ink, kPi * 0.5f);
+            else if (i == 1)
+            {
+                /* a disk: its body with a cut corner, the label and the shutter */
+                const float bx[6] = {-12, 7, 12, 12, -12, -12}, by[6] = {-12, -12, -7, 12, 12, -12};
+                for (int k = 0; k < 5; ++k)
+                    g.line(ix + bx[k], iy + by[k], ix + bx[k + 1], iy + by[k + 1], th_, ink);
+                g.panel(ix - 6 - th_ / 2, iy - 12 - th_ / 2, 11 + th_, 7 + th_, kClear, 1, 0, ink, th_);
+                g.panel(ix - 7 - th_ / 2, iy + 2 - th_ / 2, 14 + th_, 10 + th_, kClear, 1, 0, ink, th_);
+            }
+            else if (i == 2)
+            {
+                /* an arrow down into a tray */
+                g.line(ix, iy - 13, ix, iy + 4, th_, ink);
+                g.line(ix - 7, iy - 3, ix, iy + 4, th_, ink);
+                g.line(ix + 7, iy - 3, ix, iy + 4, th_, ink);
+                g.line(ix - 12, iy + 3, ix - 12, iy + 12, th_, ink);
+                g.line(ix - 12, iy + 12, ix + 12, iy + 12, th_, ink);
+                g.line(ix + 12, iy + 12, ix + 12, iy + 3, th_, ink);
+            }
+            else
+            {
+                /* a camera */
+                g.panel(ix - 15, iy - 9, 30, 21, kClear, 1, 4, ink, th_);
+                g.line(ix - 6, iy - 12, ix + 6, iy - 12, th_, ink);
+                g.panel(ix - 6, iy - 3, 12, 12, kClear, 1, 6, ink, th_);
+            }
+            g.text_mid(Font::Regular, 22, ix, kTilesTop + 83, ink, Align::Center, fit(g, Font::Regular, 22, tr(kNames[i]), tw - 16));
+            if (on)
+            {
+                ring[0] = tx, ring[1] = kTilesTop, ring[2] = tw, ring[3] = kTileH;
+            }
+        }
+    }
+    /* The saving and loading slots take the list's place. */
+    if (menu_slots_mode_)
+    {
+        const bool saving = menu_slots_mode_ == 1;
+        g.text_mid(Font::SemiBold, 26, kInset + 4, list_top + 16, kWhite, Align::Left, tr(saving ? "Save to which slot?" : "Load which slot?"));
+        const float sw = (kInner - kGap * 2) / 3, sh = sw * 0.62f, sy = list_top + 44;
+        for (int i = 0; i < porpoise::states::kSlots; ++i)
+        {
+            const float sx = kInset + float(i) * (sw + kGap);
+            const bool on = i == menu_slot_;
+            g.panel(sx, sy, sw, sh, row_fill, 1, 14, on ? (menu_confirm_ && saving ? rgba(0xFFB347) : kWhite) : edge, on ? 2.5f : 1);
+            if (menu_slot_tex_[i])
+            {
+                const float a = float(menu_slot_tex_[i]->width) / float(std::max(1, menu_slot_tex_[i]->height));
+                float iw = sw - 8, ih = iw / a;
+                if (ih > sh - 8)
+                {
+                    ih = sh - 8;
+                    iw = ih * a;
+                }
+                g.image(menu_slot_tex_[i], sx + (sw - iw) * 0.5f, sy + (sh - ih) * 0.5f, iw, ih, kWhite, 10);
+            }
+            else
+                g.text_mid(Font::Regular, 20, sx + sw * 0.5f, sy + sh * 0.5f, faint, Align::Center, menu_slot_used_[i] ? tr("Saved") : tr("Empty"));
+            g.text_mid(Font::SemiBold, 20, sx + 4, sy + sh + 20, on ? kWhite : copy, Align::Left, trf("Slot {n}", {{"n", std::to_string(i + 1)}}));
+            if (menu_slot_used_[i])
+                g.text_mid(Font::Regular, 16, sx + 4, sy + sh + 44, faint, Align::Left, fit(g, Font::Regular, 16, slot_date(menu_slot_time_[i]), sw - 8));
+        }
+    }
+    else
+    {
+        /* The list: every category, the open one's rows under it, Quit apart at the end. */
+        static const char *const kCats[kTabCount + 1] = {"Game", "Video", "Graphics", "Sound", "Controls", "Patches", "Achievements"};
+        const std::vector<int> cat_tabs = sheet_categories(p, wii, tabs);
+        const int quit_cat = int(cat_tabs.size());
+        /* The rows on their own (Fast Forward and so on), whichever category is open */
+        const std::vector<Row> game_rows = rows_for(kTabGame, p, wii, &patches);
+        const std::vector<Row> volume_rows = sheet_rows(kEcVolume, p, wii, &patches);
+        const auto plain_row = [&](int cat_tab) -> const Row * {
+            if (cat_tab == kEcVolume)
+                return volume_rows.empty() ? nullptr : &volume_rows[0];
+            const Kind kind = cat_tab == kEcFast ? Kind::FastForward : cat_tab == kEcDisc ? Kind::Disc : Kind::Restart;
+            for (const Row &r : game_rows)
+                if (r.kind == kind)
+                    return &r;
+            return nullptr;
+        };
+        /* Achievements: rows like any category's, as Playtendoh's 3DS has them: earned when, or the points */
+        const bool ach_shown = menu_tab_ == kTabCount;
+        std::vector<Row> ach_rows;
+        std::vector<std::string> ach_values;
+        int ach_earned = 0;
+        for (const Achievement &a : ach_.list)
+        {
+            ach_earned += a.unlocked ? 1 : 0;
+            if (!ach_shown)
+                continue;
+            Row r{Kind::Info, "", nullptr};
+            r.text = a.title;
+            ach_rows.push_back(r);
+            std::string when;
+            if (a.unlocked && a.unlock_time > 0)
+            {
+                const std::time_t stamp = std::time_t(a.unlock_time);
+                char date[32] = {0};
+                if (const std::tm *tm = std::localtime(&stamp))
+                    std::strftime(date, sizeof date, "%Y-%m-%d", tm);
+                when = date;
+            }
+            ach_values.push_back(!a.unlocked ? plural((long long)a.points, "1 point", "{n} points")
+                                 : when.empty() ? tr("Earned")
+                                                : trf("Earned {when}", {{"when", when}}));
+        }
+        const std::vector<Row> &list_rows = ach_shown ? ach_rows : rows;
+        const int list_focus = ach_shown ? ach_focus_ : menu_row_;
+        struct Line
+        {
+            int cat, row; /* row -1: the category's own */
+            float y;
+        };
+        std::vector<Line> lines;
+        float ly = 0;
+        const int focus_cat = ec_cat_;
+        int focus_line = -1;
+        for (int c = 0; c <= quit_cat; ++c)
+        {
+            if (c == quit_cat)
+                ly += 22;
+            if (!ec_open_ && !ec_on_tiles_ && c == focus_cat)
+                focus_line = int(lines.size());
+            lines.push_back({c, -1, ly});
+            ly += kPitch;
+            if (c == ec_shown_ && c < quit_cat)
+                for (int r = 0; r < int(list_rows.size()); ++r)
+                {
+                    if (ec_open_ && r == list_focus)
+                        focus_line = int(lines.size());
+                    lines.push_back({c, r, ly});
+                    ly += kPitch;
+                }
+        }
+        /* Hold, Cross and its ring, as a row to confirm has them */
+        const auto hold_mark = [&](float right, float cy, Color colour) {
+            const float r = 11, rcx = right - r;
+            const float progress = ec_hold_ >= 0 ? std::min(1.0f, float((time_ - ec_hold_) / 0.6)) : 0.0f;
+            constexpr int kSegments = 32;
+            for (int s = 0; s < kSegments; ++s)
+            {
+                const float a0 = -kPi * 0.5f + 2 * kPi * float(s) / kSegments, a1 = -kPi * 0.5f + 2 * kPi * float(s + 1) / kSegments;
+                const bool lit = float(s + 1) / kSegments <= progress;
+                g.line(rcx + r * std::cos(a0), cy + r * std::sin(a0), rcx + r * std::cos(a1), cy + r * std::sin(a1), 3, lit ? colour : with_alpha(colour, 0.25f));
+            }
+            const float bx = right - r * 2 - 12 - 9;
+            g.line(bx - 7.2f, cy - 7.2f, bx + 7.2f, cy + 7.2f, 2.2f, copy);
+            g.line(bx - 7.2f, cy + 7.2f, bx + 7.2f, cy - 7.2f, 2.2f, copy);
+            g.text_mid(Font::Regular, 24, bx - 19, cy + 1, copy, Align::Right, tr("Hold"));
+        };
+        const float room = list_bottom - list_top;
+        if (focus_line >= 0)
+        {
+            /* Its neighbours half in view too, as Playtendoh's menu scrolls */
+            const float fy = lines[std::size_t(focus_line)].y;
+            const float top = fy - (focus_line > 0 ? kPitch * 0.5f : 0.0f);
+            const float bottom = fy + kRowH + (focus_line + 1 < int(lines.size()) ? kPitch * 0.5f : 0.0f);
+            if (top < ec_scroll_target_)
+                ec_scroll_target_ = top;
+            if (bottom - ec_scroll_target_ > room)
+                ec_scroll_target_ = bottom - room;
+        }
+        else
+            ec_scroll_target_ = 0;
+        const float total = ly - (kPitch - kRowH);
+        ec_scroll_target_ = std::clamp(ec_scroll_target_, 0.0f, std::max(0.0f, total - room));
+        ec_scroll_ += (ec_scroll_target_ - ec_scroll_) * (ec_ring_ok_ ? 1.0f - std::exp(-16.0f * float(dt)) : 1.0f);
+        g.set_clip(list_top - 12, list_bottom + 12);
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            const Line &l = lines[i];
+            const float ry = list_top + l.y - ec_scroll_;
+            const bool child = l.row >= 0, on = int(i) == focus_line, quit = l.cat == quit_cat;
+            const int cat_tab = child || quit ? 0 : cat_tabs[std::size_t(l.cat)];
+            const Row *const row_p = child ? &list_rows[std::size_t(l.row)] : !quit && cat_tab >= kEcFast ? plain_row(cat_tab) : nullptr;
+            const float indent = child ? 24.0f : 0.0f, rx = kInset + indent, rw = kInner - indent;
+            if (on)
+            {
+                ring[0] = rx;
+                ring[1] = ry;
+                ring[2] = rw;
+                ring[3] = kRowH;
+            }
+            if (ry + kRowH < list_top - 12 || ry > list_bottom + 12)
+                continue;
+            if (quit)
+                g.panel(kInset + 8, ry - 14, kInner - 16, 1.5f, edge, 1, 0);
+            if (on)
+                g.panel(rx, ry, rw, kRowH, focus_fill, 1, 20);
+            else if (child)
+                g.panel(rx, ry, rw, kRowH, row_fill, 1, 20);
+            const float cy = ry + kRowH * 0.5f;
+            float right = rx + rw - 20;
+            if (!row_p)
+            {
+                const std::string label = quit ? tr("Quit to the library") : cat_tab == kEcGba ? std::string("GBA") : tr(kCats[cat_tab]);
+                g.text_mid(Font::ExtraBold, 26, rx + 20, cy, quit ? rgba(0xFF7272) : text_c, Align::Left, label);
+                if (!quit)
+                    chevron(right - 4, cy, faint, l.cat == ec_shown_ ? 2 : 0);
+                /* What it's set to, beside the chevron, as the Wii U's categories say */
+                if (!quit)
+                {
+                    std::string says;
+                    if (cat_tab == kTabCount)
+                        says = trf("{a} of {b}", {{"a", std::to_string(ach_earned)}, {"b", std::to_string(ach_.list.size())}});
+                    else if (cat_tab == kTabPatches)
+                    {
+                        int patches_on = 0;
+                        for (const bool cheat_on : menu_cheat_on_)
+                            patches_on += cheat_on ? 1 : 0;
+                        says = trf("{n} on", {{"n", std::to_string(patches_on)}});
+                    }
+                    else
+                    {
+                        const char *const key = cat_tab == kTabVideo ? "resolution" : cat_tab == kTabGraphics ? "shader_mode"
+                                                : cat_tab == kTabAudio ? "audio_preset" : cat_tab == kTabControls ? "button_layout" : "";
+                        if (*key)
+                            for (const Row &candidate : rows_for(cat_tab, p, wii, &patches))
+                                if (candidate.key == std::string(key))
+                                {
+                                    bool unused = true;
+                                    row_value(candidate, says, unused);
+                                }
+                    }
+                    if (!says.empty())
+                        g.text_mid(Font::Regular, 24, right - 28, cy + 1, copy, Align::Right, fit(g, Font::Regular, 24, says, rw * 0.5f));
+                }
+                if (quit && on)
+                    hold_mark(right, cy, rgba(0xFF7272));
+                continue;
+            }
+            const Row &row = *row_p;
+            const Font label_font = child ? Font::Regular : Font::ExtraBold;
+            const float label_size = child ? 24.0f : 26.0f;
+            std::string value;
+            bool arrows = true;
+            if (child && ach_shown)
+            {
+                value = ach_values[std::size_t(l.row)];
+                arrows = false;
+            }
+            else
+                row_value(row, value, arrows);
+            const std::string label = row.label ? tr(row.label) : row.text;
+            float value_left = right;
+            if (!child && row.kind == Kind::Restart && on)
+            {
+                hold_mark(right, cy, kAccent);
+                value_left = right - 120;
+            }
+            else if (!value.empty())
+            {
+                const bool show_arrows = on && arrows;
+                if (show_arrows)
+                {
+                    chevron(right - 4, cy, copy, 0);
+                    right -= 22;
+                }
+                const bool slider = row.iv && row.key == std::string("volume") && row.values.size() > 1;
+                const float slider_w = slider ? 132.0f + 18.0f : 0.0f;
+                const float label_room = g.measure(label_font, label_size, label) + 36;
+                const float room_v = std::max(rw * 0.34f, right - rx - 20 - label_room - slider_w);
+                value = fit(g, Font::Regular, 24, value, room_v);
+                const float vw = g.measure(Font::Regular, 24, value);
+                g.text_mid(Font::Regular, 24, right, cy + 1, slider ? text_c : copy, Align::Right, value);
+                value_left = right - vw;
+                if (slider)
+                {
+                    /* its track, filled in the side's colour to the knob */
+                    const float track_right = value_left - 18, track_left = track_right - 132;
+                    const float at = std::clamp(float(*row.iv - row.min) / float(row.values.size() - 1), 0.0f, 1.0f);
+                    const float knob = track_left + (track_right - track_left) * at;
+                    g.panel(track_left, cy - 3, track_right - track_left, 6, focus_fill, 1, 3);
+                    g.panel(track_left, cy - 3, knob - track_left, 6, kAccent, 1, 3);
+                    g.panel(knob - 9, cy - 9, 18, 18, text_c, 1, 9);
+                    value_left = track_left - 12;
+                }
+                if (show_arrows)
+                    chevron(value_left - 14, cy, copy, 1);
+                if (show_arrows)
+                    value_left -= 22;
+            }
+            else if (row.kind == Kind::Group)
+            {
+                chevron(right - 4, cy, on ? copy : faint, g_group_open[std::clamp(row.index, 0, kGroupCount - 1)] ? 2 : 0);
+                value_left = right - 22;
+            }
+            else if (on)
+            {
+                chevron(right - 4, cy, copy, 0);
+                value_left = right - 22;
+            }
+            g.text_mid(label_font, label_size, rx + 20 + (row.child ? 24.0f : 0.0f), cy + (child ? 1.0f : 0.0f), child && !on ? copy : text_c, Align::Left,
+                       fit(g, label_font, label_size, label, std::max(80.0f, value_left - rx - 40)));
+        }
+        g.clear_clip();
+        if (ach_shown && ec_open_)
+        {
+            /* the one in focus, large, beside the sheet */
+            g.set_layer(0, 0, t);
+            draw_achievement_card(1000, 120, 840, 840);
+            g.set_layer(slide, 0, 0.3f + 0.7f * t);
+        }
+        if (total > room)
+        {
+            const float bar_top = list_top + room * ec_scroll_ / total, bar_h = room * room / total;
+            g.panel(x + w - 16, list_top, 4, room, row_fill, 1, 2);
+            g.panel(x + w - 16, bar_top, 4, bar_h, faint, 1, 2);
+        }
+    }
+    /* The ring, gliding to the focus. */
+    if (ring[2] > 0)
+    {
+        const float k = ec_ring_ok_ ? 1.0f - std::exp(-20.0f * float(dt)) : 1.0f;
+        for (int i = 0; i < 4; ++i)
+            ec_ring_[i] += (ring[i] - ec_ring_[i]) * k;
+        ec_ring_ok_ = true;
+        /* menu_canvas.h's Ring: ink inside, white outside, breathing, glowing in the side's colour. A panel's
+         * border is inside its edge; Playtendoh's strokes straddle theirs. */
+        const float breath = 0.94f + 0.06f * std::sin(float(time) * 6.2831853f / 2.4f);
+        const auto stroke = [&](float out, float thick, Color c) {
+            const float o = out + thick * 0.5f;
+            g.panel(ec_ring_[0] - o, ec_ring_[1] - o, ec_ring_[2] + o * 2, ec_ring_[3] + o * 2, kClear, 1, 20 + o, c, thick);
+        };
+        for (int glow = 3; glow >= 1; --glow)
+            stroke(4.0f + 5.0f * float(glow), 5, with_alpha(kAccent, 0.06f * breath));
+        stroke(2, 4, rgba(0x05070D, 0.9f));
+        stroke(5.5f, 3.5f, rgba(0xFFFFFF, breath));
+    }
+    /* The help, two lines at most, or what's just happened. */
+    {
+        std::string text;
+        if (!menu_note_.empty() && time_ - menu_note_time_ < 4.0)
+            text = menu_note_;
+        else if (!waiting.empty())
+            text = plural((long long)waiting.size(), "1 change waiting: Square applies it.", "{n} changes waiting: Square applies them.");
+        else if (ec_open_ && !menu_slots_mode_ && menu_tab_ == kTabCount)
+        {
+            if (ach_focus_ >= 0 && ach_focus_ < int(ach_.list.size()))
+                text = ach_.list[std::size_t(ach_focus_)].description;
+        }
+        else if (ec_open_ && !menu_slots_mode_ && !rows.empty())
+            {
+                const Row &focus = rows[std::size_t(std::clamp(menu_row_, 0, int(rows.size()) - 1))];
+                text = focus.kind == Kind::Cheat && focus.index >= 0 && focus.index < int(menu_cheats_.size())
+                           ? cheat_help(menu_cheats_[std::size_t(focus.index)]) + "  " + tr("Takes effect the next time the game starts.")
+                           : focus.key == std::string("ws_status") ? tr(ws_help(p.ws_plan, wii)) : tr(help_for(focus, p));
+            }
+        else if (!ec_on_tiles_ && !menu_slots_mode_)
+        {
+            /* a row on its own */
+            const std::vector<int> cats_now = sheet_categories(p, wii, tabs);
+            if (ec_cat_ == int(cats_now.size()))
+                text = tr("Leaves the game for the library. What you have not saved in the game is lost, so Cross is held.");
+            if (ec_cat_ < int(cats_now.size()) && cats_now[std::size_t(ec_cat_)] >= kEcFast)
+            {
+                const int plain = cats_now[std::size_t(ec_cat_)];
+                const Kind kind = plain == kEcFast ? Kind::FastForward : plain == kEcDisc ? Kind::Disc : Kind::Restart;
+                if (plain == kEcVolume)
+                {
+                    for (const Row &r : sheet_rows(kEcVolume, p, wii, &patches))
+                        text = tr(help_for(r, p));
+                }
+                else if (plain == kEcRestart)
+                    text = tr("Starts the game again from the beginning. What you have not saved in the game is lost, so Cross is held.");
+                else
+                    for (const Row &r : rows_for(kTabGame, p, wii, &patches))
+                        if (r.kind == kind)
+                            text = tr(help_for(r, p));
+            }
+        }
+        float ly = list_bottom + 30;
+        for (const std::string &l : wrap(g, Font::Regular, 20, text, kInner - 8, 2))
+        {
+            g.text_mid(Font::Regular, 20, kInset + 4, ly, faint, Align::Left, l);
+            ly += 26;
+        }
+    }
+    /* The hints. */
+    {
+        /* menu_canvas.h's Hint: its Button, in lines, and what it does */
+        float px = kInset + 4;
+        const float py = y + h - 62;
+        enum Mark { MarkCross, MarkCircle, MarkChange, MarkSquare };
+        std::vector<std::pair<Mark, std::string>> hints = {{MarkCross, tr("Choose")}};
+        if (!menu_slots_mode_)
+            hints.push_back({MarkChange, tr("Change")});
+        hints.push_back({MarkCircle, ec_open_ || menu_slots_mode_ ? tr("Back") : tr("Back to the game")});
+        if (!waiting.empty())
+            hints.push_back({MarkSquare, tr("Apply")});
+        float words = 0;
+        for (const auto &hint : hints)
+            words += 30 + g.measure(Font::Regular, 22, hint.second) + 32;
+        const float size = words <= kInner - 8 ? 22.0f : std::max(22.0f * 0.75f, 22.0f * (kInner - 8) / words);
+        for (const auto &hint : hints)
+        {
+            const float bx = px + 11, by = py + 14, r = 9, thick = 2.2f;
+            if (hint.first == MarkCross)
+            {
+                g.line(bx - r * 0.8f, by - r * 0.8f, bx + r * 0.8f, by + r * 0.8f, thick, copy);
+                g.line(bx - r * 0.8f, by + r * 0.8f, bx + r * 0.8f, by - r * 0.8f, thick, copy);
+            }
+            else if (hint.first == MarkCircle)
+                g.panel(bx - r - thick / 2, by - r - thick / 2, (r + thick / 2) * 2, (r + thick / 2) * 2, kClear, 1, r + thick / 2, copy, thick);
+            else if (hint.first == MarkSquare)
+                g.panel(bx - r * 0.8f - thick / 2, by - r * 0.8f - thick / 2, r * 1.6f + thick, r * 1.6f + thick, kClear, 1, 2, copy, thick);
+            else
+                for (const float side : {-1.0f, 1.0f})
+                {
+                    const float tip = bx + side * (r + 3);
+                    g.line(tip, by, tip - side * 6, by - 6, thick, copy);
+                    g.line(tip, by, tip - side * 6, by + 6, thick, copy);
+                }
+            g.text_mid(Font::Regular, size, px + 30, py + 13, copy, Align::Left, hint.second);
+            px += 30 + g.measure(Font::Regular, size, hint.second) + 32 * size / 22.0f;
+        }
+    }
+    }
+    else
+    {
+    const float row_h = gl ? 50.0f : 56.0f, rx = x + 24, rw = w - 48;
+    float ry = hy;
+    /* A long tab (Patches; Graphics or Controls with a game's extra rows): a
+     * window on its rows, around the focus. */
+    int first = 0, last = int(rows.size());
+    {
+        /* What's below the rows keeps its room: the Game tab's three slots
+         * (with the help line and the prompts, ~300), Patches' longer help. */
+        const float reserve = menu_tab_ == kTabGame ? (gl ? 270.0f : 330.0f) : menu_tab_ == kTabPatches ? 200.0f : 150.0f;
+        const int visible = std::max(3, int((y + h - reserve - hy) / row_h));
+        if (last > visible)
+        {
+            first = std::clamp(menu_row_ - visible / 2, 0, last - visible);
+            last = first + visible;
+        }
+        if (first > 0)
+            g.glyph(Glyph::Arrow, x + w * 0.5f, hy - 2, 14, kCyan, 0.0f);
+    }
+    for (int i = first; i < last; ++i)
+    {
+        const Row &row = rows[std::size_t(i)];
+        if (row.gap_before && i > first)
+        {
+            g.panel(x + 36, ry + 6, w - 72, gl ? 1.0f : 1.5f, gl ? rgba(0xFFFFFF, 0.16f) : rgba(0x6F8FE0, 0.5f), 1, 0);
+            ry += 14;
+        }
+        const float cy = ry + row_h * 0.5f;
+        const bool on = i == menu_row_;
+        if (row.kind != Kind::Info)
+            mp_hit(rx + slide, ry, rw, row_h, kMpRow + i);
+        if (on && gl)
+            skin_select(rx, ry + 3, rw, row_h - 6, (row_h - 6) * 0.5f, 1.0f);
+        else if (on)
+            g.panel(rx, ry + 4, rw, row_h - 8, rgba(0x1D45B8, 0.9f), 0.7f, kR, kIcy, 2.2f, 8, 0.18f);
+        const float indent = row.child ? 26.0f : 0.0f;
+        const float label_size = gl ? (row.child ? ts(21) : ts(23)) : ts(27), value_size = gl ? ts(21) : ts(25);
+        const std::string label = row.label ? tr(row.label) : row.text;
+        bool row_waiting = false;
+        if (row.key && *row.key)
+            row_waiting = std::find(waiting.begin(), waiting.end(), std::string(row.key)) != waiting.end() ||
+                          (std::string(row.key) == "audio_preset" &&
+                           std::find_if(waiting.begin(), waiting.end(), [](const std::string &k) {
+                               return k.rfind("audio_", 0) == 0;
+                           }) != waiting.end());
+        if (row.kind == Kind::Cheat && row.index >= 0 && row.index < int(menu_cheats_.size()))
+        {
+            const Cheat &c = menu_cheats_[std::size_t(row.index)];
+            for (const std::string &k : {cheat_key(c, true), cheat_key(c, false)})
+                row_waiting |= std::find(waiting.begin(), waiting.end(), k) != waiting.end();
+        }
+        if (row_waiting)
+            g.panel(rx + 8, cy - 6, 12, 12, kPending, 1, 6); /* changed, not applied yet */
+        g.text_mid(on ? Font::Bold : Font::SemiBold, label_size, rx + 28 + indent, cy, on ? kWhite : kSoft, Align::Left,
+                   row.label ? label : fit(g, on ? Font::Bold : Font::SemiBold, label_size, label, rw * 0.62f));
+        std::string value;
+        bool arrows = true;
+        row_value(row, value, arrows);
         if (!value.empty())
         {
             const float right = rx + rw - 24;
@@ -2265,6 +3030,8 @@ void App::draw_game_menu(double time)
             }
         }
     }
+
+    } /* the old look's list, slots, help and prompts */
 
     /* A question over the menu: Apply or Discard before it closes, or
      * starting the game over for changes that need it. */

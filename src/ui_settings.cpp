@@ -114,9 +114,25 @@ const Field kFields[] = {
     {"gba_buttons_use", &Settings::gba_buttons_use, nullptr, 0, 2},
     {"gba_modifier", &Settings::gba_modifier, nullptr, 0, porpoise::pad::CtlCount - 1},
     {"gba_stick_dpad", nullptr, &Settings::gba_stick_dpad, 0, 1},
-    {"gba_show_mode", &Settings::gba_show_mode, nullptr, 0, 2},
+    {"gba_show_mode", &Settings::gba_show_mode, nullptr, 0, 3},
 
     {"gba_always", nullptr, &Settings::gba_always, 0, 1},
+    {"gba_port1_show", &Settings::gba_port1_show, nullptr, -1, 3},
+    {"gba_port1_corner", &Settings::gba_port1_corner, nullptr, 0, 5},
+    {"gba_port2_show", &Settings::gba_port2_show, nullptr, -1, 3},
+    {"gba_port2_corner", &Settings::gba_port2_corner, nullptr, 0, 5},
+    {"gba_port3_show", &Settings::gba_port3_show, nullptr, -1, 3},
+    {"gba_port3_corner", &Settings::gba_port3_corner, nullptr, 0, 5},
+    {"gba_port4_show", &Settings::gba_port4_show, nullptr, -1, 3},
+    {"gba_port4_corner", &Settings::gba_port4_corner, nullptr, 0, 5},
+    {"gc_port1_player", &Settings::gc_port1_player, nullptr, 0, 4},
+    {"gba_port1_mode", &Settings::gba_port1_mode, nullptr, 0, 3},
+    {"gc_port2_player", &Settings::gc_port2_player, nullptr, 0, 4},
+    {"gba_port2_mode", &Settings::gba_port2_mode, nullptr, 0, 3},
+    {"gc_port3_player", &Settings::gc_port3_player, nullptr, 0, 4},
+    {"gba_port3_mode", &Settings::gba_port3_mode, nullptr, 0, 3},
+    {"gc_port4_player", &Settings::gc_port4_player, nullptr, 0, 4},
+    {"gba_port4_mode", &Settings::gba_port4_mode, nullptr, 0, 3},
     {"invert_c", &Settings::invert_c, nullptr, 0, 3},
     {"stick_sensitivity", &Settings::stick_sensitivity, nullptr, 0, 3},
     {"stick_deadzone", &Settings::stick_deadzone, nullptr, 0, 3},
@@ -192,6 +208,7 @@ const Field kFields[] = {
     {"welcome_45", nullptr, &Settings::welcome_45, 0, 1},
     {"hide_duplicates", nullptr, &Settings::hide_duplicates, 0, 1},
     {"auto_picks", nullptr, &Settings::auto_picks, 0, 1},
+    {"auto_boost", nullptr, &Settings::auto_boost, 0, 1},
     {"menu_haptics", nullptr, &Settings::menu_haptics, 0, 1},
     {"motion_logs", nullptr, &Settings::motion_logs, 0, 1},
     {"cpu_clock", &Settings::cpu_clock, nullptr, 0, 9},
@@ -412,7 +429,7 @@ bool Settings::load(const std::string &path, bool overlay)
                 const long n = std::strtol(c, &end, 10);
                 if (end == c)
                     break;
-                row[i] = std::clamp(int(n), 0, porpoise::pad::CtlCount - 1);
+                row[i] = std::clamp(int(n), -1, porpoise::pad::CtlCount - 1); /* -1: on no button */
                 c = end;
             }
             continue;

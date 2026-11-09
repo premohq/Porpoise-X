@@ -90,9 +90,8 @@ void set_option(const char *key, const char *value);
 void set_picture(int filter, float strength);
 /* The sticks turned around (0 no, 1 up-down, 2 left-right, 3 both). */
 void set_stick_invert(int main_stick, int c_stick);
-/* 4.0: the GameCube port player 1's controller is in (0..3); the player who
- * would be there takes port 1. Takes effect at the next frame, mid-game too. */
-void set_player1_port(int port);
+/* Who plays each GameCube port: 0..3 a player, -1 nobody. Takes effect at the next frame, mid-game too. */
+void set_port_players(const int players[4]);
 /* The integrated GBAs (GameCube games). For each GameCube port, who plays its GBA: -2 no GBA
  * there, -1 nobody (the page in a browser only), 0..3 a player (their GBA buttons,
  * porpoise::pad::State::gba_keys, go to it each frame; Reset GBA too; its sound on their
