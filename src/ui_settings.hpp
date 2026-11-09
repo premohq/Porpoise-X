@@ -137,14 +137,14 @@ struct Settings
     bool gba_web = true; /* the GBA's screen and buttons as a page in a browser */
     int gba_modifier = porpoise::pad::CtlL3;
     int gba_buttons[porpoise::pad::GbaCount] = {
-        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, porpoise::pad::CtlTouch, porpoise::pad::CtlOptions,
+        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, -1, porpoise::pad::CtlOptions,
         porpoise::pad::CtlRight, porpoise::pad::CtlLeft,   porpoise::pad::CtlUp,    porpoise::pad::CtlDown,
         porpoise::pad::CtlR1,    porpoise::pad::CtlL1,     porpoise::pad::CtlTriangle, porpoise::pad::CtlCircle,
         porpoise::pad::CtlL2,    -1,                       -1,                     porpoise::pad::CtlR2, -1, -1, -1};
     /* A second set ("Mine 2"; gba_buttons above is "Mine 1"), and which is played:
      * 0 Porpoise's own (porpoise::pad::gba_defaults), 1 Mine 1, 2 Mine 2. */
     int gba_buttons2[porpoise::pad::GbaCount] = {
-        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, porpoise::pad::CtlTouch, porpoise::pad::CtlOptions,
+        porpoise::pad::CtlCross, porpoise::pad::CtlSquare, -1, porpoise::pad::CtlOptions,
         porpoise::pad::CtlRight, porpoise::pad::CtlLeft,   porpoise::pad::CtlUp,    porpoise::pad::CtlDown,
         porpoise::pad::CtlR1,    porpoise::pad::CtlL1,     porpoise::pad::CtlTriangle, porpoise::pad::CtlCircle,
         porpoise::pad::CtlL2,    -1,                       -1,                     porpoise::pad::CtlR2, -1, -1, -1};
@@ -162,6 +162,34 @@ struct Settings
     /* Who plays each port's GBA: 0..3 player 1..4 (with their GBA button held), 4 the port's own
      * controller (no GBA button: it is the GBA), 5 nobody (the page in a browser only). */
     int gba_port1_control = 0, gba_port2_control = 0, gba_port3_control = 0, gba_port4_control = 0;
+    /* Who plays a port holding a controller (0..3 a player, 4 nobody), and how each GBA's button works
+     * (0 hold, 1 toggle, 2 always on, 3 always off). */
+    int gc_port1_player = 0, gc_port2_player = 1, gc_port3_player = 2, gc_port4_player = 3;
+    int gba_port1_mode = 0, gba_port2_mode = 0, gba_port3_mode = 0, gba_port4_mode = 0;
+    /* Each GBA's screen: when it shows (-1 as gba_show_mode, 0 held, 1 toggle, 2 on, 3 off), and where
+     * (0 automatic, 1 top left, 2 top right, 3 bottom left, 4 bottom right, 5 manual: gba_window_x, y). */
+    int gba_port1_show = -1, gba_port2_show = -1, gba_port3_show = -1, gba_port4_show = -1;
+    int gba_port1_corner = 0, gba_port2_corner = 0, gba_port3_corner = 0, gba_port4_corner = 0;
+    int gba_show(int port) const
+    {
+        const int c[4] = {gba_port1_show, gba_port2_show, gba_port3_show, gba_port4_show};
+        return port >= 0 && port < 4 && c[port] >= 0 ? std::clamp(c[port], 0, 3) : gba_show_mode;
+    }
+    int *gba_corner(int port)
+    {
+        int *const c[4] = {&gba_port1_corner, &gba_port2_corner, &gba_port3_corner, &gba_port4_corner};
+        return c[std::clamp(port, 0, 3)];
+    }
+    int port_player(int port) const
+    {
+        const int c[4] = {gc_port1_player, gc_port2_player, gc_port3_player, gc_port4_player};
+        return port >= 0 && port < 4 ? std::clamp(c[port], 0, 4) : 4;
+    }
+    int gba_mode(int port) const
+    {
+        const int c[4] = {gba_port1_mode, gba_port2_mode, gba_port3_mode, gba_port4_mode};
+        return port >= 0 && port < 4 ? std::clamp(c[port], 0, 3) : 0;
+    }
     int gba_control(int port) const
     {
         const int c[4] = {gba_port1_control, gba_port2_control, gba_port3_control, gba_port4_control};
@@ -305,7 +333,7 @@ struct Settings
     void save_wii_preset(int slot, int name);
     bool use_wii_preset(int slot);
     bool motion_readout = false; /* in a game: the controller's motion on screen (developer options) */
-    bool debug_logs = true;      /* test builds: /data/porpoise/debug */
+    bool debug_logs = false;     /* /data/porpoise/debug, when turned on */
     /* Developer options: unlocked in About, for tuning the Wii Remote. Without
      * them the readout, inverted pointer and motion logs are off. */
     bool developer = false;
@@ -317,9 +345,10 @@ struct Settings
     bool setup_checked = false; /* the first-start setup check has been shown */
     bool welcome_45 = false;
     bool hide_duplicates = false;
+    bool auto_boost = true; /* Playtendoh: a new game starts with its tested settings; kept here for it, read there */
     bool auto_picks = true; /* 4.6: Porpoise's Picks applied to a game the first time (unless the player changed it) */
     bool menu_haptics = true; /* 4.5: light ticks on the controller moving through the menus */ /* a game kept in two formats shown once (Library::set_hide_duplicates) */    /* 4.5's welcome (a look to use) has been shown */
-    bool motion_logs = true; /* a CSV of the controller's motion per Wii game (developer options) */
+    bool motion_logs = false; /* a CSV of the controller's motion per Wii game (developer options) */
     /* System */
     int cpu_clock = 5;       /* index into the clock list (50% .. 300%): 100% */
     bool dual_core = true;   /* dolphin_main_cpu_thread */

@@ -185,8 +185,9 @@ struct Host
     bool ports_real = false; /* the ports were given real Wii Remotes (WiiConfig::real_remotes) */
     /* 4.0: player 1's GameCube port (Settings > Controls); the player whose
      * port that is takes port 1. Wii games keep 0. */
-    std::atomic<int> p1_port_want{0};
-    int p1_port = 0;
+    /* Who plays each GameCube port (0..3 a player, -1 nobody). */
+    std::atomic<int> ports_want[4] = {0, 1, 2, 3};
+    int ports[4] = {0, 1, 2, 3};
     std::FILE *log = nullptr;
 };
 
@@ -476,17 +477,10 @@ void perf_stop(retro_perf_counter *counter)
 
 void perf_log() {}
 
-/* 4.0: whose controller is in a GameCube port: player 1's port and port 1
- * swap players (Player 1's Port); Wii games as they are. */
+/* Whose controller is in a GameCube port, -1 nobody's (set_port_players); Wii games as they are. */
 int player_of(unsigned port)
 {
-    if (h.wii.active || h.p1_port == 0)
-        return int(port);
-    if (int(port) == h.p1_port)
-        return 0;
-    if (port == 0)
-        return h.p1_port;
-    return int(port);
+    return h.wii.active || port >= 4 ? int(port) : h.ports[port];
 }
 
 /* Player 1 last played with the Switch 2's GameCube controller (else the
@@ -1218,7 +1212,7 @@ int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id)
     if (port >= unsigned(porpoise::pad::kMaxPlayers))
         return 0;
     const int player = player_of(port);
-    if (player == 0 && h.hold_input)
+    if (player < 0 || (player == 0 && h.hold_input))
         return 0;
     const bool two = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
     if (two && port == 1)
@@ -1651,9 +1645,10 @@ bool has_gba()
     return false;
 }
 
-void set_player1_port(int port)
+void set_port_players(const int players[4])
 {
-    h.p1_port_want.store(std::clamp(port, 0, porpoise::pad::kMaxPlayers - 1));
+    for (int port = 0; port < 4; ++port)
+        h.ports_want[port].store(std::clamp(players[port], -1, porpoise::pad::kMaxPlayers - 1));
 }
 
 void set_stick_invert(int main_stick, int c_stick)
@@ -1920,7 +1915,8 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
      * keeps its controller when a player leaves, so no game pauses for it. */
     porpoise::pad::poll();
     publish_frame_pads();
-    h.p1_port = h.wii.active ? 0 : std::clamp(h.p1_port_want.load(), 0, porpoise::pad::kMaxPlayers - 1);
+    for (int port = 0; port < 4; ++port)
+        h.ports[port] = h.ports_want[port].load();
     for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
     {
         const int player = player_of(unsigned(port));
@@ -2190,11 +2186,17 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
         publish_frame_pads();
         log_motion();
         /* A controller that joins mid-game is plugged into its GameCube port. */
-        /* 4.0: Player 1's Port changed (the in-game menu): player 1's
-         * controller goes into its new port, out of the old one. */
-        if (!h.wii.active && h.p1_port_want.load() != h.p1_port)
+        const bool two_controllers = h.wii.active && h.wii.controller == porpoise::pad::WiiTwoControllers;
+        /* Who plays a port changed (the in-game menu): each controller goes into its new port. */
+        bool ports_changed = false;
+        for (int port = 0; port < 4; ++port)
+            if (h.ports_want[port].load() != h.ports[port])
+            {
+                h.ports[port] = h.ports_want[port].load();
+                ports_changed = true;
+            }
+        if (!h.wii.active && ports_changed)
         {
-            h.p1_port = std::clamp(h.p1_port_want.load(), 0, porpoise::pad::kMaxPlayers - 1);
             for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
             {
                 const int player = player_of(unsigned(port));
@@ -2205,7 +2207,7 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
                     h.api.set_controller_port_device(unsigned(port), want ? port_device(port) : RETRO_DEVICE_NONE);
                 }
             }
-            ps5::debug::mark_value("core: player 1 in GameCube port", h.p1_port + 1);
+            ps5::debug::mark("core: GameCube ports' players changed");
         }
         for (int port = 0; port < porpoise::pad::kMaxPlayers; ++port)
             if (!h.plugged[port] && porpoise::pad::playing(player_of(unsigned(port))) && !nunchuk_port(port))

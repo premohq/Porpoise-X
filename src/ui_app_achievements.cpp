@@ -124,6 +124,9 @@ std::string badge_file(const std::string &url)
 void App::load_achievements(const std::string &disc_id, bool live)
 {
     ach_ = ach_source_ ? ach_source_(disc_id, live) : AchievementSet{};
+    /* Playtendoh's menus: what's left to earn first, the earned after it */
+    if (ecam_)
+        std::stable_partition(ach_.list.begin(), ach_.list.end(), [](const Achievement &x) { return !x.unlocked; });
     ach_for_ = disc_id;
     ach_live_ = live;
     ach_loaded_at_ = time_;

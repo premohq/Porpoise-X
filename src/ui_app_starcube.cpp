@@ -217,6 +217,8 @@ App::Action App::update_starcube(bool left, bool right, bool up, bool down, bool
             sc_open(sc_face_, true);
             sfx(Sound::DetailsFlip);
         }
+        if (ecam_ && pressed(BtnCircle))
+            return Action::BackToPlaytendoh; /* the cube is the top of the menus Playtendoh opened */
         return Action::None;
     }
     if (screen_ != Screen::Main)

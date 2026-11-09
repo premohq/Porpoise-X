@@ -125,6 +125,9 @@ std::uint32_t wii_menu_bits(std::uint16_t remote_buttons);
  * the control stick the D-pad. 0 when it isn't plugged in. */
 std::uint32_t gc_menu_bits();
 
+/* Playtendoh's loading screen, as its side has it; also before there's an App to ask (porpoise_main.cpp). */
+void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, const std::string &title, const std::string &status);
+
 class App
 {
 public:
@@ -140,6 +143,7 @@ public:
         InstallUpdate,
         InstallVersion, /* the one picked in About > Choose a version (picked_version()) */
         Quit,        /* close Porpoise (after an update) */
+        BackToPlaytendoh, /* Circle at the top of the menus Playtendoh opened */
         Reinitialize, /* settings wiped: Porpoise starts again as at its first start */
         MoveData,     /* Porpoise's folder moves to move_target() */
         UseFolder,    /* the Porpoise folder already at move_target() becomes the one in use */
@@ -1081,6 +1085,16 @@ public:
     /* Whether PS5-ECAM started Porpoise (ecam_bridge.h): no rows for what PS5-ECAM does instead, its
      * updates, home screen tiles, cover downloads, menu sounds and the folder it keeps Porpoise's things in. */
     void set_ecam(bool ecam) { ecam_ = ecam; }
+    /* What Playtendoh said of the game it started (its session file): its loading screen's words and cover. */
+    void set_ecam_session(const std::string &side, const std::string &title, const std::string &details, const std::string &cover,
+                          const std::string &banner)
+    {
+        ecam_banner_path_ = banner;
+        ecam_side_ = side;
+        ecam_title_ = title;
+        ecam_details_ = details;
+        ecam_cover_ = cover;
+    }
     void set_diagnostics(std::function<std::vector<std::pair<bool, std::string>>()> checks)
     {
         diagnostics_ = std::move(checks);
@@ -1116,6 +1130,22 @@ public:
 private:
     bool sandboxed_ = false;
     bool ecam_ = false;
+    std::string ecam_side_, ecam_title_, ecam_details_, ecam_cover_;
+    Texture *ecam_cover_tex_ = nullptr;
+    bool ecam_cover_tried_ = false;
+    void draw_ecam_launch(double time);
+    bool wii_side_colour() const;
+    /* Playtendoh's sheet for the in-game menu (ui_app_ingame.cpp). */
+    bool ec_open_ = false, ec_on_tiles_ = true, ec_ring_ok_ = false;
+    std::string ecam_banner_path_; /* the game's full-screen picture, while it starts */
+    Texture *ecam_banner_tex_ = nullptr;
+    bool ecam_banner_tried_ = false;
+    double ec_hold_ = -1; /* when Cross went down on Quit, held to confirm */
+    bool ec_quit_held_ = false; /* held long enough: this frame, as Cross on its row */
+    int ec_tile_ = 0, ec_cat_ = 0;
+    int ec_shown_ = -1; /* the category open in the list, whose rows show */
+    float ec_scroll_ = 0, ec_scroll_target_ = 0, ec_ring_[4] = {0, 0, 0, 0};
+    double ec_time_ = 0;
     bool searching_ = false;
     std::vector<std::string> version_tags_, version_labels_;
     std::vector<std::size_t> version_sizes_;
@@ -1218,10 +1248,10 @@ private:
 
     /* The Revolution look's home screen (ui_app_home.cpp): a grid of tiles,
      * twelve to a page, pointed at with the controller's motion. */
-    bool revolution() const { return settings_ && settings_->ui_theme == 1; }
-    bool starcube() const { return settings_ && settings_->ui_theme == int(ThemeId::StarCube); }
+    bool revolution() const { return !ecam_ && settings_ && settings_->ui_theme == 1; }
+    bool starcube() const { return !ecam_ && settings_ && settings_->ui_theme == int(ThemeId::StarCube); }
     /* 4.1: the new Porpoise (liquid glass, lit by the game you're on). */
-    bool glass() const { return settings_ && settings_->ui_theme == int(ThemeId::Glass); }
+    bool glass() const { return !ecam_ && settings_ && settings_->ui_theme == int(ThemeId::Glass); }
     /* The library's view as drawn now: Revolution's Library View keeps its choice;
      * Porpoise is a cover flow or rows (the shelf's moves); Classic a cover flow. */
     int lib_view_now() const
@@ -1290,7 +1320,7 @@ private:
         return size * (settings_->text_size == 3 ? 0.88f : 1.0f + 0.15f * float(settings_->text_size)); /* 3: Smaller */
     }
     /* The theme in use, and the renderer set for it (each frame). */
-    const Theme &th() const { return theme(settings_ ? settings_->ui_theme : 0); }
+    const Theme &th() const { return theme(settings_ && !ecam_ ? settings_->ui_theme : 0); }
     void apply_look();
     void draw_theme_overlay();
     int theme_seen_ = -1;

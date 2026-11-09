@@ -511,6 +511,8 @@ bool start_gfx()
     init.get_device_proc = c.get_device_proc;
     init.queue_mutex = c.queue_mutex;
     init.asset_dir = PORPOISE_APP "/assets";
+    if (ecam_bridge::request.valid)
+        init.ui_font_dir = "/app0/assets/ui/fonts";
     init.cjk_font = porpoise::ui::cjk_font(); /* the menus' language is set by now */
     init.cjk_also = porpoise::ui::language_names();
     if (!g_data.empty())
@@ -520,6 +522,8 @@ bool start_gfx()
     }
     const long long t0 = now_ns();
     const bool ok = g_gfx.init(init);
+    ps5::debug::mark_value("ui: renderer's pipeline, ms", g_gfx.init_pipeline_ms);
+    ps5::debug::mark_value("ui: renderer's letters, ms", g_gfx.init_fonts_ms);
     ps5::debug::mark_value(ok ? "ui: renderer ready, ms" : "ui: renderer FAILED, ms", (now_ns() - t0) / 1000000);
     return ok;
 }
@@ -1233,8 +1237,13 @@ void apply_frame_gen()
  * the player who would be there takes port 1 (porpoise::core::set_player1_port). */
 int player_in_port(int port, bool wii_game)
 {
-    const int p1 = wii_game ? 0 : std::clamp(g_play.p1_port, 0, 3);
-    return port == p1 ? 0 : port == 0 ? p1 : port;
+    if (wii_game)
+        return port;
+    /* Controls > Ports' player, then Player 1's Port (the in-game menu) swaps with port 1. */
+    const int p1 = std::clamp(g_play.p1_port, 0, 3);
+    const int from = port == p1 ? 0 : port == 0 ? p1 : port;
+    const int player = g_play.port_player(from);
+    return player > 3 ? -1 : player;
 }
 
 /* Who plays each GBA (-2 no GBA in that port, -1 nobody, 0..3 a player), and whether directly
@@ -1249,7 +1258,7 @@ void gba_players(bool wii_game, int who[4], bool direct[4])
             continue;
         const int c = g_play.gba_control(port);
         if (c <= 3)
-            who[port] = g_play.gba_buttons_on ? c : -1;
+            who[port] = g_play.gba_buttons_on && g_play.gba_mode(port) != 3 ? c : -1;
         else if (c == 4)
         {
             who[port] = player_in_port(port, wii_game);
@@ -1285,6 +1294,12 @@ void apply_gba(bool wii_game)
         for (int port = 0; port < 4; ++port)
             if (who[port] == player)
             {
+                /* A player on two GBAs: the first's mode. */
+                if (!c.active)
+                {
+                    c.toggle = g_play.gba_mode(port) == 1;
+                    c.direct = c.direct || g_play.gba_mode(port) == 2;
+                }
                 c.active = true;
                 c.direct = c.direct || direct[port];
             }
@@ -1292,11 +1307,19 @@ void apply_gba(bool wii_game)
     }
 }
 
+void apply_port_players(bool wii_game)
+{
+    int players[4];
+    for (int port = 0; port < 4; ++port)
+        players[port] = player_in_port(port, wii_game);
+    porpoise::core::set_port_players(players);
+}
+
 void apply_game_controls(bool wii_game)
 {
     apply_gba(wii_game);
     porpoise::core::set_stick_invert(g_play.invert_main, g_play.invert_c);
-    porpoise::core::set_player1_port(wii_game ? 0 : g_play.p1_port);
+    apply_port_players(wii_game);
     porpoise::core::set_stick_shape(g_play.stick_sensitivity, g_play.stick_deadzone);
     porpoise::pad::set_fast_forward_buttons(g_play.ff_buttons);
     porpoise::pad::set_quick_buttons(g_play.quick_slot > 0);
@@ -1670,7 +1693,7 @@ int menu_paused(void *)
         porpoise::core::set_stick_invert(g_play.invert_main, g_play.invert_c);
     else if (key == "p1_port")
     {
-        porpoise::core::set_player1_port(g_play.p1_port);
+        apply_port_players(porpoise::pad::wii().active);
         apply_gba(porpoise::pad::wii().active); /* a GBA played by its port's own controller follows */
     }
     else if (key == "gba_reset")
@@ -2546,9 +2569,12 @@ void draw_gba_window(int port, const porpoise::pad::State &pad)
         return;
     }
     const bool held = pad.gba_show;
-    if (g_play.gba_show_mode == 2)
+    const int show = g_play.gba_show(port);
+    if (show == 3)
+        W.shown = false; /* Always off */
+    else if (show == 2)
         W.shown = true; /* On */
-    else if (g_play.gba_show_mode == 1)
+    else if (show == 1)
     {
         if (held && !W.was)
             W.shown = !W.shown;
@@ -2644,7 +2670,8 @@ void draw_gba_window(int port, const porpoise::pad::State &pad)
     W.quick_save_was = pad.gba_quick_save;
     W.quick_load_was = pad.gba_quick_load;
     const bool noting = g_time < W.note_until;
-    const bool visible = W.shown || W.moving || pad.gba_opacity || noting;
+    /* Always off, or toggled off: not for Move, Opacity or Volume either. */
+    const bool visible = show != 3 && (show != 1 || W.shown) && (W.shown || W.moving || pad.gba_opacity || noting);
     if (!visible)
         return;
     unsigned w = 0, h = 0;
@@ -2732,6 +2759,13 @@ void draw_gba_window(int port, const porpoise::pad::State &pad)
     /* Its own corner until moved: port 1 bottom right, 2 bottom left, 3 top right, 4 top left. */
     float x = g_play.gba_window_x[port] >= 0 ? float(g_play.gba_window_x[port]) : (port % 2 == 0 ? 1920 - 48 - sw : 48);
     float y = g_play.gba_window_y[port] >= 0 ? float(g_play.gba_window_y[port]) : (port < 2 ? 1080 - 48 - sh : 48);
+    /* A corner chosen in Settings; moving it by hand makes it manual. */
+    const int corner = *g_play.gba_corner(port);
+    if (corner >= 1 && corner <= 4)
+    {
+        x = corner == 1 || corner == 3 ? 48.0f : 1920 - 48 - sw;
+        y = corner <= 2 ? 48.0f : 1080 - 48 - sh;
+    }
     if (pushed && W.moving)
     {
         /* Up to about 900 pixels a second at a full push. */
@@ -2739,6 +2773,7 @@ void draw_gba_window(int port, const porpoise::pad::State &pad)
         x += speed(pad.gba_move_x);
         y += speed(pad.gba_move_y);
         g_gba_moved = true;
+        *g_play.gba_corner(port) = *g_settings.gba_corner(port) = 5;
     }
     x = std::clamp(x, 8.0f, std::max(8.0f, 1920 - 8 - sw));
     y = std::clamp(y, 8.0f, std::max(8.0f, 1080 - 8 - sh));
@@ -2785,6 +2820,7 @@ void draw_gba_screen()
     }
 }
 
+double launch_first_picture = -1; /* g_time at the game's first frame */
 void launch_frame(bool core_frame, double fps, void *)
 {
     if (core_frame && !g_boot_marker.empty())
@@ -2806,7 +2842,23 @@ void launch_frame(bool core_frame, double fps, void *)
     if (!core_frame)
     {
         g_app.draw_launch(g_time);
+        launch_first_picture = -1;
         return;
+    }
+    if (ecam_bridge::request.valid && !g_menu_open)
+    {
+        /* Playtendoh's loading screen over the game's first black frames, then out of the way */
+        constexpr double kHold = 0.8, kFade = 0.1;
+        if (launch_first_picture < 0)
+            launch_first_picture = g_time;
+        const double since = g_time - launch_first_picture;
+        if (since < kHold + kFade)
+        {
+            g_gfx.set_layer(0, 0, since < kHold ? 1.0f : float(1.0 - (since - kHold) / kFade));
+            g_app.draw_launch(g_time);
+            g_gfx.set_layer();
+            return;
+        }
     }
     if (!g_menu_open)
     {
@@ -3211,18 +3263,74 @@ int main(int argc, char **argv)
     }
 
     /* The launcher runs on Porpoise's own device. */
-    if (!porpoise::vk::open_device(nullptr) || !start_gfx())
+    const bool device_open = porpoise::vk::open_device(nullptr);
+    mark_start("start: device open, ms");
+    if (device_open && ecam_bridge::request.valid)
+    {
+        /* Started by Playtendoh: its loading screen's dark, not black, while the renderer is made (a new
+         * build's first start makes its letters, some seconds) */
+        sceSystemServiceHideSplashScreen();
+        for (int frame = 0; frame < 2; ++frame)
+            porpoise::vk::present_clear(0.071f, 0.086f, 0.114f);
+    }
+    if (!device_open || !start_gfx())
     {
         sceSystemServiceHideSplashScreen();
         leave(1);
     }
+    mark_start("start: renderer ready, ms");
     porpoise::vk::set_overlay(overlay, nullptr);
     porpoise::vk::set_prepass(prepass, nullptr);
-    if (forwarded.rom.empty())
+    if (forwarded.rom.empty() && !ecam_bridge::request.valid) /* PS5-ECAM's start shows no mark of Porpoise's */
         show_boot_mark();
     else
     {
         /* Straight to the game: the launch screen is the first thing seen. */
+        /* Started by Playtendoh: its loading screen up before the splash goes, so no black between. */
+        if (ecam_bridge::request.valid && g_gfx.ready())
+        {
+            std::string title, cover, banner;
+            bool wii = false;
+            if (std::FILE *f = std::fopen((g_data + "/playtendoh-session.txt").c_str(), "r"))
+            {
+                char line[1024];
+                while (std::fgets(line, sizeof line, f))
+                {
+                    std::string s = line;
+                    while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+                        s.pop_back();
+                    if (s.rfind("title=", 0) == 0)
+                        title = s.substr(6);
+                    else if (s.rfind("cover=", 0) == 0)
+                        cover = s.substr(6);
+                    else if (s.rfind("banner=", 0) == 0)
+                        banner = s.substr(7);
+                    else if (s == "side=Wii")
+                        wii = true;
+                }
+                std::fclose(f);
+            }
+            /* The game's full-screen picture when there's one, else its cover */
+            const bool has_banner = !banner.empty() && access(banner.c_str(), R_OK) == 0;
+            g_gfx.set_async_loads(false);
+            porpoise::ui::Texture *tex = has_banner ? g_gfx.texture_file(banner)
+                                         : !cover.empty() && access(cover.c_str(), R_OK) == 0 ? g_gfx.texture_file(cover) : nullptr;
+            g_gfx.set_async_loads(true);
+            for (int frame = 0; frame < 30; ++frame)
+            {
+                const bool ready = !tex || tex->width > 0;
+                begin_ui_frame(0.0f);
+                if (has_banner && ready && tex)
+                    g_gfx.image(tex, 0, 0, 1920, 1080);
+                else
+                    porpoise::ui::draw_ecam_launch_screen(g_gfx, wii, ready ? tex : nullptr, title, "");
+                porpoise::vk::present_clear(0, 0, 0);
+                if (ready)
+                    break;
+            }
+            if (tex)
+                g_gfx.free_texture(tex);
+        }
         ps5::debug::mark_value("main: splash hidden", sceSystemServiceHideSplashScreen());
         g_pacer.start(porpoise::vk::refresh_hz(), "boot");
     }
@@ -3315,6 +3423,39 @@ int main(int argc, char **argv)
     apply_settings();
     g_app.set_sandboxed(g_sandboxed);
     g_app.set_ecam(ecam_bridge::request.valid);
+    if (ecam_bridge::request.valid)
+    {
+        /* Playtendoh's word on the game it started: a line each, key=value; this game's only. */
+        const std::string file = g_data + "/playtendoh-session.txt";
+        std::string side, title, details, cover, banner;
+        if (std::FILE *f = std::fopen(file.c_str(), "r"))
+        {
+            char line[1024];
+            while (std::fgets(line, sizeof line, f))
+            {
+                std::string s = line;
+                while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+                    s.pop_back();
+                const std::size_t eq = s.find('=');
+                if (eq == std::string::npos)
+                    continue;
+                const std::string k = s.substr(0, eq), v = s.substr(eq + 1);
+                if (k == "side")
+                    side = v;
+                else if (k == "title")
+                    title = v;
+                else if (k == "details")
+                    details = v;
+                else if (k == "cover")
+                    cover = v;
+                else if (k == "banner")
+                    banner = v;
+            }
+            std::fclose(f);
+            std::remove(file.c_str());
+        }
+        g_app.set_ecam_session(side, title, details, cover, banner);
+    }
     g_app.set_diagnostics(diagnostics);
     /* Started by PS5-ECAM, no first start of Porpoise's: PS5-ECAM set up its folder (/data/porpoise, where
      * PS5-ECAM's Settings and Saves find it) and its menus are PS5-ECAM's. */
@@ -3611,6 +3752,11 @@ int main(int argc, char **argv)
                     ps5::debug::mark(("main: installing chosen version " + g_releases[std::size_t(pick)].tag).c_str());
                     porpoise::update::start_install(g_releases[std::size_t(pick)], install_dir());
                 }
+            }
+            if (action == porpoise::ui::App::Action::BackToPlaytendoh)
+            {
+                ps5::debug::mark("main: back to Playtendoh from Porpoise's menus");
+                leave(0);
             }
             if (action == porpoise::ui::App::Action::Quit)
             {
