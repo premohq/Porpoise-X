@@ -7,6 +7,7 @@
  * with stb_image (both public domain / MIT, Sean Barrett). */
 #include "ui_gfx.hpp"
 
+#include <chrono>
 #include <algorithm>
 #include <dirent.h>
 #include <atomic>
@@ -35,6 +36,7 @@
 #define STBI_MAX_DIMENSIONS 8192 /* 4.0: a huge picture is refused, not a crash out of memory */
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
+#define STBI_ONLY_TGA /* Playtendoh keeps its pictures as TGAs */
 #include "stb/stb_image.h"
 #pragma clang diagnostic pop
 #pragma clang diagnostic ignored "-Wmissing-field-initializers"
@@ -1075,7 +1077,7 @@ void forget_others(const std::string &dir, const std::string &prefix, const std:
 
 bool Gfx::load_font(const std::string &file, FontData &fd) const
 {
-    if (!read_file(init_.asset_dir + "/fonts/" + file, fd.ttf))
+    if (!read_file(file[0] == '/' ? file : init_.asset_dir + "/fonts/" + file, fd.ttf))
         return false;
     auto *info = new stbtt_fontinfo();
     if (!stbtt_InitFont(info, fd.ttf.data(), stbtt_GetFontOffsetForIndex(fd.ttf.data(), 0)))
@@ -1107,11 +1109,13 @@ bool Gfx::build_fonts()
     }
     static const char *const files[4] = {"Nunito-Regular.ttf", "Nunito-SemiBold.ttf", "Nunito-Bold.ttf",
                                          "Nunito-ExtraBold.ttf"};
+    /* Playtendoh's has three weights: its SemiBold for Bold too, its Medium (a row's label) for ExtraBold. */
+    const char *const lexend[4] = {"/Lexend-Regular.ttf", "/Lexend-SemiBold.ttf", "/Lexend-SemiBold.ttf", "/Lexend-Medium.ttf"};
     /* The fonts themselves and their measurements: quick. */
     for (int f = 0; f < 4; ++f)
     {
         FontData &fd = fonts_[f];
-        if (!load_font(files[f], fd))
+        if (!(!init_.ui_font_dir.empty() && load_font(init_.ui_font_dir + lexend[f], fd)) && !load_font(files[f], fd))
             return false;
         auto *info = static_cast<stbtt_fontinfo *>(fd.info);
         fd.scale = stbtt_ScaleForPixelHeight(info, kBase);
@@ -1705,11 +1709,17 @@ bool Gfx::init(const GfxInit &init)
 {
     init_ = init;
     device_ = init.device;
+    const auto since = [](std::chrono::steady_clock::time_point t) {
+        return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t).count();
+    };
+    const auto t0 = std::chrono::steady_clock::now();
     if (!load_functions() || !create_pipeline())
     {
         shutdown();
         return false;
     }
+    init_pipeline_ms = since(t0);
+    const auto t1 = std::chrono::steady_clock::now();
     const std::uint8_t white[4] = {255, 255, 255, 255};
     white_ = upload(white, 1, 1);
     if (!white_ || !build_fonts())
@@ -1717,6 +1727,7 @@ bool Gfx::init(const GfxInit &init)
         shutdown();
         return false;
     }
+    init_fonts_ms = since(t1);
     brand_mask_ = texture_file(init_.asset_dir + "/brand/dolphin-mask.png");
     icons_ = texture_file(init_.asset_dir + "/ui/buttons.png");
     icons_solid_ = texture_file(init_.asset_dir + "/ui/buttons-solid.png");
@@ -1824,6 +1835,7 @@ void Gfx::begin(unsigned slot, float target_w, float target_h, float time, float
             ++i;
     vertices_.clear();
     batches_.clear();
+    clear_clip();
     overflowed_ = false;
 }
 
@@ -1850,8 +1862,9 @@ void Gfx::push(Texture *t, const Vertex v[4])
         return;
     }
     VkDescriptorSet set = (t ? t : white_)->set;
-    if (batches_.empty() || batches_.back().set != set)
-        batches_.push_back({set, std::uint32_t(vertices_.size()), 0});
+    if (batches_.empty() || batches_.back().set != set || batches_.back().scissor.offset.y != clip_.offset.y ||
+        batches_.back().scissor.extent.height != clip_.extent.height)
+        batches_.push_back({set, std::uint32_t(vertices_.size()), 0, clip_});
     static const int order[6] = {0, 1, 2, 0, 2, 3};
     const float fade = layer_fade_ * intro_fade_, dy = layer_dy_ + intro_dy_;
     const float scale = look_.content_scale;
@@ -2040,6 +2053,64 @@ void Gfx::panel(float x, float y, float w, float h, Color fill_c, float bottom_m
         fill(v[i].p1, {(w + margin * 2) * px, (h + margin * 2) * px, w * px, h * px});
         fill(v[i].p2, {bottom_mul, sheen, plain ? 1.0f : 0.0f, presence_}); /* (w: thin glass's presence) */
         fill(v[i].bcolor, {border.r, border.g, border.b, border.a});
+    }
+    push(nullptr, v);
+}
+
+void Gfx::set_clip(float top, float bottom)
+{
+    const float k = target_h_ / kDesignH;
+    const int y0 = std::clamp(int(top * k), 0, int(target_h_)), y1 = std::clamp(int(bottom * k), y0, int(target_h_));
+    clip_ = {{0, y0}, {std::uint32_t(target_w_), std::uint32_t(y1 - y0)}};
+}
+
+void Gfx::clear_clip()
+{
+    clip_ = {{0, 0}, {std::uint32_t(target_w_), std::uint32_t(target_h_)}};
+}
+
+void Gfx::line(float x0, float y0, float x1, float y1, float thick, Color c)
+{
+    const float dx = x1 - x0, dy = y1 - y0, len = std::sqrt(dx * dx + dy * dy);
+    if (len <= 0)
+        return;
+    c = tone(c);
+    /* A flat panel turned along the line: the shader's edges are soft in the panel's own terms. */
+    const float px = target_w_ / kDesignW, m = 1.5f, ux = dx / len, uy = dy / len, hw = len * 0.5f + m, hh = thick * 0.5f + m;
+    const float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+    const float local[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    Vertex v[4]{};
+    for (int i = 0; i < 4; ++i)
+    {
+        const float a = (local[i][0] * 2 - 1) * hw, b = (local[i][1] * 2 - 1) * hh;
+        to_clip(Corner{cx + ux * a - uy * b, cy + uy * a + ux * b, 1.0f}, v[i].pos);
+        fill(v[i].local, {local[i][0], local[i][1]});
+        fill(v[i].color, {c.r, c.g, c.b, c.a});
+        fill(v[i].p0, {float(K_PANEL), 0, 0, 0});
+        fill(v[i].p1, {(len + m * 2) * px, (thick + m * 2) * px, len * px, thick * px});
+        fill(v[i].p2, {1.0f, 0, 1.0f, presence_});
+    }
+    push(nullptr, v);
+}
+
+void Gfx::panel_across(float x, float y, float w, float h, Color left, Color right)
+{
+    left = tone(left);
+    right = tone(right);
+    const float px = target_w_ / kDesignW;
+    Vertex v[4]{};
+    float pos[4][4];
+    corners_flat(x, y, w, h, pos);
+    const float local[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    for (int i = 0; i < 4; ++i)
+    {
+        const Color &c = local[i][0] < 0.5f ? left : right;
+        std::memcpy(v[i].pos, pos[i], sizeof pos[i]);
+        fill(v[i].local, {local[i][0], local[i][1]});
+        fill(v[i].color, {c.r, c.g, c.b, c.a});
+        fill(v[i].p0, {float(K_PANEL), 0, 0, 0});
+        fill(v[i].p1, {w * px, h * px, w * px, h * px});
+        fill(v[i].p2, {1.0f, 0, 1.0f, presence_});
     }
     push(nullptr, v);
 }
@@ -2595,6 +2666,7 @@ void Gfx::record(VkCommandBuffer cmd, int slot)
     for (const Batch &b : batches_)
     {
         vkCmdBindDescriptorSets_(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &b.set, 0, nullptr);
+        vkCmdSetScissor_(cmd, 0, 1, &b.scissor);
         vkCmdDraw_(cmd, b.count, 1, b.first, 0);
     }
 }

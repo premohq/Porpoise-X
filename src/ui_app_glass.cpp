@@ -2236,6 +2236,8 @@ void App::draw_side_menu()
 
 void App::menu_haptics()
 {
+    if (ecam_)
+        return; /* not in Playtendoh's menus, for now */
     /* A light tick as a menu or the island follows the finger on the touch
      * pad, every tenth of the way (Oct 24: not as the choice moves). */
     if (!settings_)

@@ -85,6 +85,10 @@ void App::forget_textures()
     forget_banners();
     logo_ = nullptr;
     logo_tried_ = false;
+    ecam_cover_tex_ = nullptr;
+    ecam_cover_tried_ = false;
+    ecam_banner_tex_ = nullptr;
+    ecam_banner_tried_ = false;
     wordmark_ = wordmark_mark_ = nullptr;
     eye_tex_ = nullptr;
     eye_seq_ = 0;
@@ -961,6 +965,10 @@ App::Action App::update(const Input &in, double dt)
         set_tab((int(tab_) + 2) % 3, -1);
     if (pressed(BtnR1) && !glass())
         set_tab((int(tab_) + 1) % 3, +1);
+
+    /* Opened from Playtendoh's Settings: the library's top leads back there. */
+    if (ecam_ && tab_ == Tab::Library && screen_ == Screen::Main && !dock_focus_ && pressed(BtnCircle))
+        return Action::BackToPlaytendoh;
 
     if (tab_ == Tab::Library && (!games.empty() || revolution()))
     {
@@ -1894,6 +1902,8 @@ void App::draw_curtain(float amount)
     /* As it lifts, the dolphin swells a little and goes first, with its glow
      * (the same as the boot's: no jump between them). */
     const float m = a * a;
+    if (ecam_)
+        return; /* PS5-ECAM's start: only the black, no mark of Porpoise's */
     /* Its glow breathes, slowly, while it waits: still there, not stuck. */
     const float breath = settings_ && settings_->reduced_motion ? 0.0f : 0.5f + 0.5f * std::sin(g.frame_time() * 2.2f);
     g.blob(960, 540, 900, 900, rgba(0x2F6BFF, (0.12f + 0.08f * breath) * m));
@@ -3114,6 +3124,22 @@ void App::apply_look()
 {
     if (!settings_)
         return;
+    if (ecam_)
+    {
+        /* Started by Playtendoh: its look and letters, whatever Porpoise's own theme says; the player's
+         * settings stay as they are for Porpoise on its own. */
+        Look plain;
+        plain.panel_style = 0;
+        plain.colour_filter = std::clamp(settings_->colour_filter, 0, 4);
+        plain.still = settings_->still_background || settings_->reduced_motion;
+        g_->set_look(plain);
+        g_->set_solid_icons(false);
+        g_->set_text_boost(g_->target_width() < 2000.0f ? 0.045f : 0.03f); /* its small words as heavy as ImGui draws them */
+        g_->set_theme_fonts("");
+        kR = 24;
+        theme_seen_ = settings_->ui_theme;
+        return;
+    }
     g_->set_look(look_for(*settings_));
     g_->set_solid_icons(glass());
     /* At 1080p (a 4K TV scales it up), the Porpoise look's small words a touch heavier. */
@@ -3562,10 +3588,65 @@ void App::set_launch_status(const std::string &status, float progress)
     launch_progress_ = progress;
 }
 
+/* Playtendoh's loading screen, as its Switch side's (port/eden/ingame.cpp): the cover on the left, the game's
+ * name and what's happening beside it, no square and no glide. */
+void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, const std::string &title, const std::string &status)
+{
+    /* Where Playtendoh's own "Starting" screen has them, so the hand-over doesn't move anything: the cover
+     * centred, the name and what's happening under it, over its dark backdrop in the side's colour. */
+    const Color accent = rgba(wii ? 0x3FCFF0 : 0x6F6CFF);
+    g.panel(-20, -20, 1960, 1120, rgba(0x12161D), 1.0f, 0);
+    g.blob(960, 420, 1900, 1200, with_alpha(accent, 0.14f));
+    const float ch = 560, cw = cover && cover->height > 0 ? ch * float(cover->width) / float(cover->height) : ch * 0.72f;
+    const float cx = 960 - cw * 0.5f, cy = 168;
+    g.blob(960, cy + ch * 0.55f, cw * 1.5f, ch * 1.25f, rgba(0x000000, 0.45f));
+    if (cover)
+        g.image(cover, cx, cy, cw, ch, kWhite, 16);
+    g.text_mid(Font::SemiBold, 44, 960, 792, kWhite, Align::Center, fit(g, Font::SemiBold, 44, title, 1500));
+    g.text_mid(Font::Regular, 26, 960, 852, rgba(0xF5F7FB, 0.7f), Align::Center, status);
+}
+
+void App::draw_ecam_launch(double)
+{
+    Gfx &g = *g_;
+    Texture *cover = launch_ ? cover_of(*launch_) : nullptr;
+    if (!ecam_cover_.empty() && !ecam_cover_tried_)
+    {
+        ecam_cover_tried_ = true;
+        if (access(ecam_cover_.c_str(), R_OK) == 0)
+            ecam_cover_tex_ = g.texture_file(ecam_cover_);
+    }
+    if (ecam_cover_tex_ && ecam_cover_tex_->width > 0)
+        cover = ecam_cover_tex_;
+    /* The game's own picture, full-screen, as a Wii U game's boot screen; at once, so nothing shows before it */
+    if (!ecam_banner_path_.empty() && !ecam_banner_tried_)
+    {
+        ecam_banner_tried_ = true;
+        if (access(ecam_banner_path_.c_str(), R_OK) == 0)
+        {
+            g.set_async_loads(false);
+            ecam_banner_tex_ = g.texture_file(ecam_banner_path_);
+            g.set_async_loads(true);
+        }
+    }
+    if (ecam_banner_tex_ && ecam_banner_tex_->width > 0)
+    {
+        g.image(ecam_banner_tex_, 0, 0, 1920, 1080);
+        return;
+    }
+    draw_ecam_launch_screen(g, launch_ && launch_->platform == "Wii", cover,
+                            !ecam_title_.empty() ? ecam_title_ : launch_ ? launch_->title : std::string(), tr(launch_status_));
+}
+
 void App::draw_launch(double time)
 {
     apply_look();
     Gfx &g = *g_;
+    if (ecam_)
+    {
+        draw_ecam_launch(time);
+        return;
+    }
     /* The entrance (about half a second, from Play): the library fades under
      * the launch screen, the cover glides from where it was to the middle and
      * grows, the tile rises into place under it, then the words and the bar. */

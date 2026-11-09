@@ -132,13 +132,14 @@ struct GbaConfig
 {
     bool active = false;   /* a GameCube game with a GBA in a port, and GBA buttons on */
     int modifier = CtlL3;  /* Control */
-    std::int8_t control[GbaCount] = {CtlCross, CtlSquare, CtlTouch, CtlOptions, CtlRight, CtlLeft,
+    std::int8_t control[GbaCount] = {CtlCross, CtlSquare, -1, CtlOptions, CtlRight, CtlLeft,
                                      CtlUp,    CtlDown,   CtlR1,    CtlL1,      CtlTriangle, CtlCircle,
                                      CtlL2,    -1 /* Reset GBA: none until the player gives it one */,
                                      -1 /* Mute */, CtlR2 /* Volume */, -1 /* Disconnect */,
                                      -1 /* Quick Save */, -1 /* Quick Load */};
     bool stick_dpad = false; /* the left stick is the GBA's D-pad too */
     bool direct = false;     /* no GBA button: the player is the GBA (their port holds it) */
+    bool toggle = false;     /* the GBA button turns it on and off, instead of being held */
 };
 /* Porpoise's own GBA layout (GbaConfig's defaults). */
 GbaConfig gba_defaults();
