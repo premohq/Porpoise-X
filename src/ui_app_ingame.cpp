@@ -1981,7 +1981,7 @@ void App::draw_game_menu(double time)
     const Color kPending = rgba(0xFFC857);
     g.set_layer();
     if (ecam_)
-        g.panel_across(0, 0, 1920, 1080, rgba(0x05070D, (208.0f / 255.0f) * t), rgba(0x05070D, (88.0f / 255.0f) * t));
+        g.panel_across(0, 0, 1920, 1080, rgba(0x04060C, (200.0f / 255.0f) * t), rgba(0x04060C, (48.0f / 255.0f) * t));
     else
         g.panel(0, 0, 1920, 1080, rgba(0x03050A, 0.55f * t), 1, 0);
 
@@ -1989,12 +1989,20 @@ void App::draw_game_menu(double time)
      * near-black under a fine edge, in the side's colour. 4.5's every other look: its side menu, on the right,
      * the same place and size, in the theme's own colors (glass_pill, skin_select). */
     const bool gl = !ecam_;
-    const float w = ecam_ ? 640.0f : 720.0f, x = ecam_ ? 48.0f : 1892.0f - w, y = ecam_ ? 48.0f : 28.0f, h = ecam_ ? 984.0f : 1024.0f;
+    /* Playtendoh 6.0's sheet: full height, against the screen's left edge */
+    const float w = ecam_ ? 700.0f : 720.0f, x = ecam_ ? 0.0f : 1892.0f - w, y = ecam_ ? 0.0f : 28.0f, h = ecam_ ? 1080.0f : 1024.0f;
     const float slide = (ecam_ ? -1.0f : 1.0f) * (w + 80) * (1.0f - t);
     const Color kAccent = rgba(wii_side_colour() ? 0x3FCFF0 : 0x6F6CFF);
     g.set_layer(slide, 0, 0.3f + 0.7f * t);
     if (ecam_)
-        g.panel(x, y, w, h, rgba(0x0A0F1B, 235.0f / 255.0f), 1, 28, rgba(0xFFFFFF, 26.0f / 255.0f), 1);
+    {
+        /* glass, darker at its foot, the side's colour a glow in its top corner; its edge a hairline in that
+         * colour with a soft shadow beyond it (side_menu.h) */
+        g.panel(x, y, w, h, rgba(0x0C1120, 238.0f / 255.0f), 0.62f, 0);
+        g.blob(x + 180, y + 40, 760, 420, with_alpha(kAccent, 0.12f));
+        g.panel_across(x + w, y, 36, h, rgba(0x000000, 0.31f), rgba(0x000000, 0.0f));
+        g.line(x + w, y, x + w, y + h, 1.5f, with_alpha(kAccent, 0.35f));
+    }
     else if (gl)
         glass_pill(x, y, w, h, 30, 1.15f);
     else
@@ -2014,34 +2022,36 @@ void App::draw_game_menu(double time)
     if (ecam_ && menu_game_)
     {
         Texture *cover = cover_of(*menu_game_);
-        const float box = 112, cx = 84, cy = 84;
+        const float box = 124, cx = 64, cy = 72;
         float cw = box * 0.75f, ch = box;
         if (cover && cover->height > 0)
         {
             const float fit_k = std::min(box / float(cover->width), box / float(cover->height));
             cw = float(cover->width) * fit_k;
             ch = float(cover->height) * fit_k;
-            g.panel(cx, cy + 10, cw, ch + 4, rgba(0x000000, 80.0f / 255.0f), 1, 14);
-            g.image(cover, cx, cy, cw, ch, kWhite, 14);
-            g.panel(cx, cy, cw, ch, kClear, 1, 14, rgba(0xFFFFFF, 26.0f / 255.0f), 1);
+            g.blob(cx + cw * 0.5f, cy + ch + 6, cw * 1.3f, 30, rgba(0x000000, 0.45f)); /* a soft shadow under it */
+            g.image(cover, cx, cy, cw, ch, kWhite, 12);
+            g.panel(cx, cy, cw, ch, kClear, 1, 12, rgba(0xFFFFFF, 0.15f), 1);
         }
         else
-            g.panel(cx, cy, cw, ch, rgba(0xFFFFFF, 0.055f), 1, 14, rgba(0xFFFFFF, 0.10f), 1);
-        const float tx = cx + cw + 24, tw = x + w - 36 - tx;
+            g.panel(cx, cy, cw, ch, rgba(0xFFFFFF, 0.047f), 1, 12);
+        const float tx = cx + cw + 26, tw = x + w - 40 - tx;
         const Color text = rgba(0xF5F7FB);
-        g.text_mid(Font::SemiBold, 32, tx, cy + 18, text, Align::Left, fit(g, Font::SemiBold, 32, menu_game_->title, tw));
+        /* the chips first, the name under them (side_menu.h, 6.0) */
+        const float chips_y = cy + 4 - 50;
         const std::string sys = menu_game_->platform == "Wii" ? "WII" : "GAMECUBE";
         const float chip = 24 + 22 + g.measure(Font::SemiBold, 18, sys) + 1.5f * float(sys.size());
-        g.panel(tx, cy + 50, chip, 34, with_alpha(kAccent, 0.16f), 1, 10);
-        g.panel(tx + 12, cy + 60, 14, 14, kAccent, 1, 4);
-        g.text_mid(Font::SemiBold, 18, tx + 34, cy + 67, kAccent, Align::Left, sys, 1.5f);
+        g.panel(tx, chips_y + 50, chip, 34, with_alpha(kAccent, 0.16f), 1, 10);
+        g.panel(tx + 12, chips_y + 60, 14, 14, kAccent, 1, 4);
+        g.text_mid(Font::SemiBold, 18, tx + 34, chips_y + 67, kAccent, Align::Left, sys, 1.5f);
         const std::string running = tr("RUNNING");
         const float chip2 = 24 + g.measure(Font::SemiBold, 18, running) + 1.5f * float(running.size());
-        g.panel(tx + chip + 8, cy + 50, chip2, 34, rgba(0xFFFFFF, 22.0f / 255.0f), 1, 10);
-        g.text_mid(Font::SemiBold, 18, tx + chip + 20, cy + 67, rgba(0xF5F7FB, 179.0f / 255.0f), Align::Left, running, 1.5f);
+        g.panel(tx + chip + 8, chips_y + 50, chip2, 34, rgba(0xFFFFFF, 22.0f / 255.0f), 1, 10);
+        g.text_mid(Font::SemiBold, 18, tx + chip + 20, chips_y + 67, rgba(0xF5F7FB, 179.0f / 255.0f), Align::Left, running, 1.5f);
+        g.text_mid(Font::SemiBold, 32, tx, cy + 64, text, Align::Left, fit(g, Font::SemiBold, 32, menu_game_->title, tw));
         if (!ecam_details_.empty())
-            g.text_mid(Font::Regular, 20, tx, cy + 102, rgba(0xF5F7FB, 117.0f / 255.0f), Align::Left, fit(g, Font::Regular, 20, ecam_details_, tw));
-        hy = 224;
+            g.text_mid(Font::Regular, 20, tx, cy + 104, rgba(0xF5F7FB, 117.0f / 255.0f), Align::Left, fit(g, Font::Regular, 20, ecam_details_, tw));
+        hy = 232;
     }
     if (!ecam_ && menu_game_)
     {
@@ -2324,14 +2334,14 @@ void App::draw_game_menu(double time)
     };
     if (ecam_)
     {
-    const float kInset = 84, kInner = 568, kTilesTop = 224, kTileH = 120, kGap = 12, kRowH = 56, kPitch = 62;
-    const float list_top = kTilesTop + kTileH + 24, list_bottom = y + h - 150;
+    /* side_menu.h's, 6.0 */
+    const float kInset = 64, kInner = 576, kTilesTop = 232, kTileH = 132, kGap = 12, kRowH = 56, kPitch = 60;
+    const float list_top = kTilesTop + kTileH + 24, list_bottom = y + h - 164, footer = y + h - 100;
     const double dt = std::clamp(time - ec_time_, 0.0, 0.1);
     ec_time_ = time;
-    float ring[4] = {0, 0, 0, 0};
     /* menu_canvas.h's Side(): the same values, its 0-255 alphas as they are */
     const Color text_c = rgba(0xF5F7FB), copy = rgba(0xF5F7FB, 179.0f / 255.0f), faint = rgba(0xF5F7FB, 117.0f / 255.0f),
-                row_fill = rgba(0xFFFFFF, 14.0f / 255.0f), focus_fill = rgba(0xFFFFFF, 22.0f / 255.0f), edge = rgba(0xFFFFFF, 26.0f / 255.0f);
+                row_fill = rgba(0xFFFFFF, 14.0f / 255.0f), edge = rgba(0xFFFFFF, 26.0f / 255.0f);
     /* Its Chevron: two thin strokes. point: 0 right, 1 left, 2 down */
     const auto chevron = [&](float cx_, float cy_, Color c, int point) {
         const float r = 6, thick = 2.2f;
@@ -2349,15 +2359,22 @@ void App::draw_game_menu(double time)
     /* The tiles. */
     {
         static const char *const kNames[4] = {"Resume", "Save State", "Load State", "Screenshot"};
-        const float tw = (kInner - kGap * 3) / 4;
+        const float tw = kInner / 4;
         for (int i = 0; i < 4; ++i)
         {
-            const float tx = kInset + float(i) * (tw + kGap);
+            const float tx = kInset + float(i) * tw;
             const bool on = !ec_open_ && ec_on_tiles_ && i == ec_tile_;
-            g.panel(tx, kTilesTop, tw, kTileH, on ? focus_fill : row_fill, 1, 20, on ? kClear : edge, on ? 0 : 1);
+            /* a round button each, the focused one filled in the side's colour (side_menu.h, 6.0) */
+            const float ix = tx + tw * 0.5f, iy = kTilesTop + 38, th_ = 2.4f, radius = 36;
+            if (on)
+            {
+                g.panel(ix - radius - 9, iy - radius - 9, (radius + 9) * 2, (radius + 9) * 2, with_alpha(kAccent, 0.16f), 1, radius + 9);
+                g.panel(ix - radius, iy - radius, radius * 2, radius * 2, kAccent, 1, radius);
+            }
+            else
+                g.panel(ix - radius, iy - radius, radius * 2, radius * 2, rgba(0xFFFFFF, 0.063f), 1, radius, rgba(0xFFFFFF, 0.08f), 1);
             /* Its icon, drawn as Playtendoh's menu_canvas.h has them, its name under it. */
-            const Color ink = on ? text_c : copy;
-            const float ix = tx + tw * 0.5f, iy = kTilesTop + 42, th_ = 2.4f;
+            const Color ink = on ? rgba(0x05070D) : text_c;
             if (i == 0)
                 g.glyph(Glyph::Arrow, ix, iy, 22, ink, kPi * 0.5f);
             else if (i == 1)
@@ -2386,11 +2403,7 @@ void App::draw_game_menu(double time)
                 g.line(ix - 6, iy - 12, ix + 6, iy - 12, th_, ink);
                 g.panel(ix - 6, iy - 3, 12, 12, kClear, 1, 6, ink, th_);
             }
-            g.text_mid(Font::Regular, 22, ix, kTilesTop + 83, ink, Align::Center, fit(g, Font::Regular, 22, tr(kNames[i]), tw - 16));
-            if (on)
-            {
-                ring[0] = tx, ring[1] = kTilesTop, ring[2] = tw, ring[3] = kTileH;
-            }
+            g.text_mid(Font::Regular, 20, ix, kTilesTop + 96, on ? kWhite : copy, Align::Center, fit(g, Font::Regular, 20, tr(kNames[i]), tw - 8));
         }
     }
     /* The saving and loading slots take the list's place. */
@@ -2527,7 +2540,34 @@ void App::draw_game_menu(double time)
         const float total = ly - (kPitch - kRowH);
         ec_scroll_target_ = std::clamp(ec_scroll_target_, 0.0f, std::max(0.0f, total - room));
         ec_scroll_ += (ec_scroll_target_ - ec_scroll_) * (ec_ring_ok_ ? 1.0f - std::exp(-16.0f * float(dt)) : 1.0f);
-        g.set_clip(list_top - 12, list_bottom + 12);
+        g.set_clip(list_top - 8, list_bottom + 8);
+        /* The focus: a tint of the side's colour with a bar at its left, gliding to the focused row (side_menu.h,
+         * 6.0, in place of the double ring) */
+        if (focus_line >= 0)
+        {
+            const Line &f = lines[std::size_t(focus_line)];
+            const float indent = f.row >= 0 ? 28.0f : 0.0f;
+            const float target[3] = {kInset - 16 + indent, list_top + f.y - ec_scroll_, kInner + 16 - indent};
+            const float k = ec_ring_ok_ ? 1.0f - std::exp(-22.0f * float(dt)) : 1.0f;
+            for (int i = 0; i < 3; ++i)
+                ec_ring_[i] += (target[i] - ec_ring_[i]) * k;
+            ec_ring_ok_ = true;
+            const Color tint = f.cat == quit_cat ? rgba(0xFF7272) : kAccent;
+            g.panel(ec_ring_[0], ec_ring_[1], ec_ring_[2], kRowH, with_alpha(tint, 0.17f), 1, 14, with_alpha(tint, 0.38f), 1);
+            g.panel(ec_ring_[0] + 6, ec_ring_[1] + 14, 4, kRowH - 28, tint, 1, 2);
+        }
+        else
+            ec_ring_ok_ = false;
+        /* an open category's rows on a thin guide down their left, in place of a box each */
+        for (std::size_t i = 0; i < lines.size(); ++i)
+            if (lines[i].row >= 0 && (i == 0 || lines[i - 1].row < 0))
+            {
+                std::size_t last = i;
+                while (last + 1 < lines.size() && lines[last + 1].row >= 0)
+                    ++last;
+                const float top = list_top + lines[i].y - ec_scroll_ + 8, bottom = list_top + lines[last].y - ec_scroll_ + kRowH - 8;
+                g.panel(kInset + 4, top, 2, bottom - top, with_alpha(kAccent, 0.45f), 1, 1);
+            }
         for (std::size_t i = 0; i < lines.size(); ++i)
         {
             const Line &l = lines[i];
@@ -2535,30 +2575,19 @@ void App::draw_game_menu(double time)
             const bool child = l.row >= 0, on = int(i) == focus_line, quit = l.cat == quit_cat;
             const int cat_tab = child || quit ? 0 : cat_tabs[std::size_t(l.cat)];
             const Row *const row_p = child ? &list_rows[std::size_t(l.row)] : !quit && cat_tab >= kEcFast ? plain_row(cat_tab) : nullptr;
-            const float indent = child ? 24.0f : 0.0f, rx = kInset + indent, rw = kInner - indent;
-            if (on)
-            {
-                ring[0] = rx;
-                ring[1] = ry;
-                ring[2] = rw;
-                ring[3] = kRowH;
-            }
-            if (ry + kRowH < list_top - 12 || ry > list_bottom + 12)
+            const float indent = child ? 28.0f : 0.0f, rx = kInset + indent, rw = kInner - indent;
+            if (ry + kRowH < list_top - 8 || ry > list_bottom + 8)
                 continue;
             if (quit)
-                g.panel(kInset + 8, ry - 14, kInner - 16, 1.5f, edge, 1, 0);
-            if (on)
-                g.panel(rx, ry, rw, kRowH, focus_fill, 1, 20);
-            else if (child)
-                g.panel(rx, ry, rw, kRowH, row_fill, 1, 20);
+                g.panel(kInset, ry - 13, kInner, 1, rgba(0xFFFFFF, 0.08f), 1, 0);
             const float cy = ry + kRowH * 0.5f;
-            float right = rx + rw - 20;
+            float right = rx + rw - 14;
             if (!row_p)
             {
                 const std::string label = quit ? tr("Quit to the library") : cat_tab == kEcGba ? std::string("GBA") : tr(kCats[cat_tab]);
-                g.text_mid(Font::ExtraBold, 26, rx + 20, cy, quit ? rgba(0xFF7272) : text_c, Align::Left, label);
+                g.text_mid(Font::SemiBold, 26, rx + 20, cy, quit ? rgba(0xFF7272) : on ? kWhite : text_c, Align::Left, label);
                 if (!quit)
-                    chevron(right - 4, cy, faint, l.cat == ec_shown_ ? 2 : 0);
+                    chevron(right - 4, cy, on ? text_c : faint, l.cat == ec_shown_ ? 2 : 0);
                 /* What it's set to, beside the chevron, as the Wii U's categories say */
                 if (!quit)
                 {
@@ -2585,14 +2614,14 @@ void App::draw_game_menu(double time)
                                 }
                     }
                     if (!says.empty())
-                        g.text_mid(Font::Regular, 24, right - 28, cy + 1, copy, Align::Right, fit(g, Font::Regular, 24, says, rw * 0.5f));
+                        g.text_mid(Font::Regular, 24, right - 28, cy + 1, on ? text_c : faint, Align::Right, fit(g, Font::Regular, 24, says, rw * 0.5f));
                 }
                 if (quit && on)
                     hold_mark(right, cy, rgba(0xFF7272));
                 continue;
             }
             const Row &row = *row_p;
-            const Font label_font = child ? Font::Regular : Font::ExtraBold;
+            const Font label_font = child ? Font::Regular : Font::SemiBold;
             const float label_size = child ? 24.0f : 26.0f;
             std::string value;
             bool arrows = true;
@@ -2615,7 +2644,7 @@ void App::draw_game_menu(double time)
                 const bool show_arrows = on && arrows;
                 if (show_arrows)
                 {
-                    chevron(right - 4, cy, copy, 0);
+                    chevron(right - 4, cy, kAccent, 0);
                     right -= 22;
                 }
                 const bool slider = row.iv && row.key == std::string("volume") && row.values.size() > 1;
@@ -2624,7 +2653,7 @@ void App::draw_game_menu(double time)
                 const float room_v = std::max(rw * 0.34f, right - rx - 20 - label_room - slider_w);
                 value = fit(g, Font::Regular, 24, value, room_v);
                 const float vw = g.measure(Font::Regular, 24, value);
-                g.text_mid(Font::Regular, 24, right, cy + 1, slider ? text_c : copy, Align::Right, value);
+                g.text_mid(Font::Regular, 24, right, cy + 1, on ? text_c : faint, Align::Right, value);
                 value_left = right - vw;
                 if (slider)
                 {
@@ -2632,13 +2661,15 @@ void App::draw_game_menu(double time)
                     const float track_right = value_left - 18, track_left = track_right - 132;
                     const float at = std::clamp(float(*row.iv - row.min) / float(row.values.size() - 1), 0.0f, 1.0f);
                     const float knob = track_left + (track_right - track_left) * at;
-                    g.panel(track_left, cy - 3, track_right - track_left, 6, focus_fill, 1, 3);
-                    g.panel(track_left, cy - 3, knob - track_left, 6, kAccent, 1, 3);
-                    g.panel(knob - 9, cy - 9, 18, 18, text_c, 1, 9);
+                    /* thin, to a small knob (6.0) */
+                    const float knob_r = on ? 8.0f : 6.0f;
+                    g.panel(track_left, cy - 2, track_right - track_left, 4, rgba(0xFFFFFF, 0.11f), 1, 2);
+                    g.panel(track_left, cy - 2, knob - track_left, 4, on ? kAccent : with_alpha(kAccent, 0.7f), 1, 2);
+                    g.panel(knob - knob_r, cy - knob_r, knob_r * 2, knob_r * 2, text_c, 1, knob_r);
                     value_left = track_left - 12;
                 }
                 if (show_arrows)
-                    chevron(value_left - 14, cy, copy, 1);
+                    chevron(value_left - 14, cy, kAccent, 1);
                 if (show_arrows)
                     value_left -= 22;
             }
@@ -2652,7 +2683,7 @@ void App::draw_game_menu(double time)
                 chevron(right - 4, cy, copy, 0);
                 value_left = right - 22;
             }
-            g.text_mid(label_font, label_size, rx + 20 + (row.child ? 24.0f : 0.0f), cy + (child ? 1.0f : 0.0f), child && !on ? copy : text_c, Align::Left,
+            g.text_mid(label_font, label_size, rx + 20 + (row.child ? 24.0f : 0.0f), cy + (child ? 1.0f : 0.0f), on ? kWhite : child ? copy : text_c, Align::Left,
                        fit(g, label_font, label_size, label, std::max(80.0f, value_left - rx - 40)));
         }
         g.clear_clip();
@@ -2666,28 +2697,8 @@ void App::draw_game_menu(double time)
         if (total > room)
         {
             const float bar_top = list_top + room * ec_scroll_ / total, bar_h = room * room / total;
-            g.panel(x + w - 16, list_top, 4, room, row_fill, 1, 2);
-            g.panel(x + w - 16, bar_top, 4, bar_h, faint, 1, 2);
+            g.panel(x + w - 18, bar_top, 3, bar_h, rgba(0xFFFFFF, 0.25f), 1, 1.5f);
         }
-    }
-    /* The ring, gliding to the focus. */
-    if (ring[2] > 0)
-    {
-        const float k = ec_ring_ok_ ? 1.0f - std::exp(-20.0f * float(dt)) : 1.0f;
-        for (int i = 0; i < 4; ++i)
-            ec_ring_[i] += (ring[i] - ec_ring_[i]) * k;
-        ec_ring_ok_ = true;
-        /* menu_canvas.h's Ring: ink inside, white outside, breathing, glowing in the side's colour. A panel's
-         * border is inside its edge; Playtendoh's strokes straddle theirs. */
-        const float breath = 0.94f + 0.06f * std::sin(float(time) * 6.2831853f / 2.4f);
-        const auto stroke = [&](float out, float thick, Color c) {
-            const float o = out + thick * 0.5f;
-            g.panel(ec_ring_[0] - o, ec_ring_[1] - o, ec_ring_[2] + o * 2, ec_ring_[3] + o * 2, kClear, 1, 20 + o, c, thick);
-        };
-        for (int glow = 3; glow >= 1; --glow)
-            stroke(4.0f + 5.0f * float(glow), 5, with_alpha(kAccent, 0.06f * breath));
-        stroke(2, 4, rgba(0x05070D, 0.9f));
-        stroke(5.5f, 3.5f, rgba(0xFFFFFF, breath));
     }
     /* The help, two lines at most, or what's just happened. */
     {
@@ -2731,18 +2742,20 @@ void App::draw_game_menu(double time)
                             text = tr(help_for(r, p));
             }
         }
-        float ly = list_bottom + 30;
-        for (const std::string &l : wrap(g, Font::Regular, 20, text, kInner - 8, 2))
+        float ly = list_bottom + 26;
+        for (const std::string &l : wrap(g, Font::Regular, 20, text, kInner, 2))
         {
-            g.text_mid(Font::Regular, 20, kInset + 4, ly, faint, Align::Left, l);
+            g.text_mid(Font::Regular, 20, kInset, ly, faint, Align::Left, l);
             ly += 26;
         }
     }
     /* The hints. */
     {
         /* menu_canvas.h's Hint: its Button, in lines, and what it does */
-        float px = kInset + 4;
-        const float py = y + h - 62;
+        /* under a hairline (6.0) */
+        g.panel(kInset, footer, kInner, 1, rgba(0xFFFFFF, 0.08f), 1, 0);
+        float px = kInset;
+        const float py = footer + 16;
         enum Mark { MarkCross, MarkCircle, MarkChange, MarkSquare };
         std::vector<std::pair<Mark, std::string>> hints = {{MarkCross, tr("Choose")}};
         if (!menu_slots_mode_)
