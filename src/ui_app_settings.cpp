@@ -13,6 +13,7 @@
 #include "porpoise_gfxmods.hpp"
 #include "porpoise_forwarders.hpp"
 #include "porpoise_paths.hpp"
+#include "trace.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -265,8 +266,8 @@ std::string App::save_report(std::string &usb)
         return "";
     /* What happened (the newest 2 MB of each log), the settings, and a note
      * of what this is. */
-    copy_file(PORPOISE_APP "/trace.txt", dir + "/trace.txt", 2u << 20);
-    copy_file(PORPOISE_APP "/porpoise/core.log", dir + "/core.log", 2u << 20);
+    copy_file(ps5::debug::trace_file(), dir + "/trace.txt", 2u << 20);
+    copy_file(PORPOISE_LOGS "/core.log", dir + "/core.log", 2u << 20);
     copy_file(settings_path_, dir + "/settings.ini");
     /* The PlayStation Move's own log: which controllers it looked at, and what it found. */
     copy_file("/data/porpoise-move.txt", dir + "/move.txt", 2u << 20);

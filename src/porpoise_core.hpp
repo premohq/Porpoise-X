@@ -24,7 +24,7 @@ struct Paths
     const char *assets = PORPOISE_APP "/content";
     const char *options = PORPOISE_APP "/porpoise/options.ini";
     const char *options_reference = PORPOISE_APP "/porpoise/options-reference.txt";
-    const char *log = PORPOISE_APP "/porpoise/core.log";
+    const char *log = PORPOISE_LOGS "/core.log";
 };
 
 /* What the launcher does while the game starts and runs. All optional. */

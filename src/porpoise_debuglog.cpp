@@ -535,8 +535,9 @@ void start(const std::string &data_dir, const std::string &trace_path, bool on)
     for (const char *sub : {"/app", "/crashes", "/controllers", "/games"})
         make(g_root + sub);
     readme();
-    /* The last run: where trace.txt stood when it started, and its app log. A
-     * crash written past that point is filed with the log's last lines. */
+    /* The last run: where its trace stood when this log started, and its app log. A
+     * crash written past that point is filed with the log's last lines. (Each start
+     * has a trace of its own: the last run's is trace.prev.txt now, trace.hpp.) */
     long from = -1;
     char last_app[256] = "";
     if (std::FILE *f = std::fopen((g_root + "/.last-run").c_str(), "r"))
@@ -546,13 +547,17 @@ void start(const std::string &data_dir, const std::string &trace_path, bool on)
         std::fclose(f);
     }
     const long size = file_size(g_trace);
-    if (from >= 0 && size > from)
+    std::string last_trace = g_trace;
+    if (last_trace.size() > 4 && last_trace.compare(last_trace.size() - 4, 4, ".txt") == 0)
+        last_trace.insert(last_trace.size() - 4, ".prev");
+    const long last_size = file_size(last_trace);
+    if (from >= 0 && last_size > from)
     {
         std::string text;
-        if (std::FILE *t = std::fopen(g_trace.c_str(), "rb"))
+        if (std::FILE *t = std::fopen(last_trace.c_str(), "rb"))
         {
             std::fseek(t, from, SEEK_SET);
-            text.resize(std::size_t(std::min(size - from, 4L << 20)));
+            text.resize(std::size_t(std::min(last_size - from, 4L << 20)));
             text.resize(std::fread(&text[0], 1, text.size(), t));
             std::fclose(t);
         }

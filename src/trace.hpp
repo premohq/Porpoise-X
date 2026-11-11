@@ -11,7 +11,8 @@
  * console output that reaches the kernel log, and the title's own stdout has no
  * reader: files in the title's folder are the only channel.
  *
- * So each step appends one line to /app0/trace.txt. Appending rather than
+ * So each step appends one line to trace.txt (in PORPOISE_LOGS: Playtendoh's
+ * /app0 can't be written). Appending rather than
  * overwriting matters - the sequence is the information, and a file per step
  * cannot show order if the program dies between two writes. The file is opened,
  * written and closed on every call so a line is on the console even if the
@@ -38,6 +39,10 @@ void mark_value(const char *step, long long value) noexcept;
 /* A line with the argument values of a driver's init call, which is where the
  * interesting mismatch would be. */
 void mark_init(const char *step, bool have_video, int width, int height) noexcept;
+
+/* Where the lines go now: PORPOISE_LOGS/trace.txt, or the sandbox's copy while /data can't be reached
+ * (porpoise_paths.hpp). Set by the first line; the crash handler and stderr write there too. */
+const char *trace_file() noexcept;
 } // namespace ps5::debug
 
 /* The same trace, with C linkage, for src/input_ps5.cpp.

@@ -1817,6 +1817,16 @@ Exit run_game(const char *game_path, const Paths &paths, const Hooks &hooks, con
     status("Loading Dolphin");
     mkdir(PORPOISE_APP "/porpoise", 0777);
     mkdir(paths.saves, 0777);
+    mkdir(PORPOISE_LOGS, 0777);
+    {
+        /* The last game's log kept beside it (core.prev.log), for a report about the one before. */
+        std::string prev = paths.log;
+        if (prev.size() > 4 && prev.compare(prev.size() - 4, 4, ".log") == 0)
+        {
+            prev.insert(prev.size() - 4, ".prev");
+            std::rename(paths.log, prev.c_str());
+        }
+    }
     h.log = std::fopen(paths.log, "w");
     if (h.wii.real_remotes)
         start_dolphinbar_log();

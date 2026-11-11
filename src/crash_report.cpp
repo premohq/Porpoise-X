@@ -7,7 +7,7 @@
  * The console's log says that a title died and where it faulted, but not what
  * called what: a call through a null pointer reports fault address 0 and nothing
  * else. This handler appends the instruction pointer, the stack pointer and the
- * return address on top of the stack to /app0/trace.txt, with the runtime address
+ * return address on top of the stack to trace.txt (trace.hpp), with the runtime address
  * of this handler, so build/title.map turns each into "object + offset" (subtract
  * the handler's slide) and a core's load base in the loader's "ready" line turns
  * an address inside a core into an offset in that core. It then flushes stdio, so
@@ -17,6 +17,7 @@
  */
 
 #include "porpoise_paths.hpp"
+#include "trace.hpp"
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -68,7 +69,7 @@ void report(int signal, siginfo_t *info, void *context_pointer)
         static_cast<unsigned long long>(rip), static_cast<unsigned long long>(rsp),
         static_cast<unsigned long long>(top),
         static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(&report)), flexible);
-    const int fd = open(PORPOISE_APP "/trace.txt", O_WRONLY | O_APPEND);
+    const int fd = open(ps5::debug::trace_file(), O_WRONLY | O_APPEND);
     if (fd >= 0 && length > 0)
         (void)!write(fd, line, static_cast<std::size_t>(length));
     /* Sixteen more stack words: with frame pointers omitted, the callers'

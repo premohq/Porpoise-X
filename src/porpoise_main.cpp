@@ -350,7 +350,7 @@ void choose_data_dir()
     g_options_path = g_data + "/options.ini";
     g_saves_path = g_data + "/saves";
     g_options_reference = g_data + "/options-reference.txt";
-    g_core_log = PORPOISE_APP "/porpoise/core.log";
+    g_core_log = PORPOISE_LOGS "/core.log";
     porpoise::ui::set_folder(g_data); /* help texts name the folder in use */
     ps5::debug::mark(("main: player data in " + g_data).c_str());
     /* Test files the Dolphin core still reads: worth knowing about when a
@@ -3120,7 +3120,7 @@ int main(int argc, char **argv)
         g_freed = porpoise::jailbreak::ensure() ? 1 : 0;
 #endif
     ps5_open_permissions();
-    if (std::freopen(PORPOISE_APP "/trace.txt", "a", stderr))
+    if (std::freopen(ps5::debug::trace_file(), "a", stderr))
     {
         static char stderr_buffer[64 * 1024];
         std::setvbuf(stderr, stderr_buffer, _IOFBF, sizeof stderr_buffer);
@@ -3221,7 +3221,7 @@ int main(int argc, char **argv)
     g_settings.load(g_settings_path);
     g_settings.stay_sandboxed = g_stay_sandboxed; /* kept in /app0/porpoise, not settings.ini */
     /* The debug folder: the app's log from here, and a crash last time filed. */
-    porpoise::debuglog::start(g_data, PORPOISE_APP "/trace.txt", g_settings.debug_logs);
+    porpoise::debuglog::start(g_data, ps5::debug::trace_file(), g_settings.debug_logs);
     porpoise::debuglog::app("Porpoise started: %s", PS5_RETROARCH_BUILD_ID);
     {
         /* Network shares: connected only when something on them is read. */
