@@ -87,8 +87,8 @@ void App::forget_textures()
     logo_tried_ = false;
     ecam_cover_tex_ = nullptr;
     ecam_cover_tried_ = false;
-    ecam_banner_tex_ = nullptr;
-    ecam_banner_tried_ = false;
+    ecam_ground_tex_ = nullptr;
+    ecam_ground_tried_ = false;
     wordmark_ = wordmark_mark_ = nullptr;
     eye_tex_ = nullptr;
     eye_seq_ = 0;
@@ -3588,54 +3588,98 @@ void App::set_launch_status(const std::string &status, float progress)
     launch_progress_ = progress;
 }
 
-/* Playtendoh's loading screen, as its Switch side's (port/eden/ingame.cpp): the cover on the left, the game's
- * name and what's happening beside it, no square and no glide. */
-void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, const std::string &title, const std::string &status)
+/* Playtendoh's loading screen, as its Switch side's (port/eden/ingame.cpp DrawLoading), place for place: the cover's
+ * colours blurred over the screen (or the game's picture, when Playtendoh has one), darker on the left; the cover on the left with a soft shadow; beside it the
+ * system's chip, the game's name, its publisher and year, and at the cover's foot what's happening over a bar. */
+void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, const std::string &title, const std::string &details,
+                             const std::string &status, float progress, double time)
 {
-    /* Where Playtendoh's own "Starting" screen has them, so the hand-over doesn't move anything: the cover
-     * centred, the name and what's happening under it, over its dark backdrop in the side's colour. */
-    const Color accent = rgba(wii ? 0x3FCFF0 : 0x6F6CFF);
-    g.panel(-20, -20, 1960, 1120, rgba(0x12161D), 1.0f, 0);
-    g.blob(960, 420, 1900, 1200, with_alpha(accent, 0.14f));
-    const float ch = 560, cw = cover && cover->height > 0 ? ch * float(cover->width) / float(cover->height) : ch * 0.72f;
-    const float cx = 960 - cw * 0.5f, cy = 168;
-    g.blob(960, cy + ch * 0.55f, cw * 1.5f, ch * 1.25f, rgba(0x000000, 0.45f));
+    const Color accent = rgba(wii ? 0x3FCFF0 : 0x6F6CFF), ink = rgba(0x05070D);
+    const Color text_c = rgba(0xF5F7FB), copy = rgba(0xF5F7FB, 179.0f / 255.0f);
+    /* Playtendoh's colours as they are, whatever Porpoise's own look would make of them */
+    const Look look = g.look();
+    const bool toned = g.toned();
+    g.set_look(Look{});
+    g.set_tone(false);
+    g.panel(-20, -20, 1960, 1120, ink, 1.0f, 0);
+    if (ground && ground->width > 0 && ground->height > 0)
+    {
+        const float k = std::max(1920.0f / float(ground->width), 1080.0f / float(ground->height));
+        const float bw = float(ground->width) * k, bh = float(ground->height) * k;
+        g.image(ground, 960 - bw * 0.5f, 540 - bh * 0.5f, bw, bh, rgba(0xFFFFFF, 170.0f / 255.0f));
+    }
+    g.panel_across(0, 0, 1920, 1080, rgba(0x05070D, 238.0f / 255.0f), rgba(0x05070D, 160.0f / 255.0f));
+    /* the cover, as the launcher's tile showed it, with a soft shadow */
+    const float ch = 520, cw = cover && cover->height > 0 ? ch * float(cover->width) / float(cover->height) : ch * 0.75f;
+    const float x0 = 200, y0 = (1080 - ch) * 0.5f;
+    for (int i = 0; i < 8; ++i)
+    {
+        const float d = 4.0f + float(i) * 5;
+        g.panel(x0 - d, y0 - d * 0.5f, cw + d * 2, ch + d * 2, rgba(0x000000, float(22 - i * 2) / 255.0f), 1, 22 + d);
+    }
     if (cover)
-        g.image(cover, cx, cy, cw, ch, kWhite, 16);
-    g.text_mid(Font::SemiBold, 44, 960, 792, kWhite, Align::Center, fit(g, Font::SemiBold, 44, title, 1500));
-    g.text_mid(Font::Regular, 26, 960, 852, rgba(0xF5F7FB, 0.7f), Align::Center, status);
+        g.image(cover, x0, y0, cw, ch, kWhite, 22);
+    else
+        g.panel(x0, y0, cw, ch, ink, 1, 22);
+    g.panel(x0, y0, cw, ch, kClear, 1, 22, rgba(0xFFFFFF, 30.0f / 255.0f), 1.5f);
+    /* beside it: the system, the game's name (two lines at most), its publisher and year */
+    const float tx = x0 + cw + 80, width = 1920 - tx - 180;
+    float y = y0 + 40;
+    const std::string sys = wii ? "WII" : "NINTENDO GAMECUBE";
+    const float chip = 24 + 22 + g.measure(Font::SemiBold, 18, sys) + 1.5f * float(sys.size());
+    g.panel(tx, y, chip, 34, accent, 1, 10);
+    g.panel(tx + 12, y + 10, 14, 14, ink, 1, 4);
+    g.text_mid(Font::SemiBold, 18, tx + 34, y + 17, ink, Align::Left, sys, 1.5f);
+    y += 64;
+    const std::vector<std::string> lines = wrap(g, Font::SemiBold, 60, title, width, 2);
+    for (std::size_t i = 0; i < lines.size(); ++i)
+        g.text(Font::SemiBold, 60, tx, y + float(i) * 70, text_c, Align::Left, lines[i]);
+    y += float(lines.size()) * 70 + 18;
+    if (!details.empty())
+        g.text(Font::Regular, 26, tx, y, copy, Align::Left, fit(g, Font::Regular, 26, details, width));
+    /* at the cover's foot: the step, and a bar: filled as far as it got, or a short light running along it */
+    const float by = y0 + ch - 64, bar = std::min(width, 560.0f);
+    g.text(Font::Regular, 24, tx, by, text_c, Align::Left, status);
+    g.panel_across(tx, by + 44, bar, 6, rgba(0xFFFFFF, 26.0f / 255.0f), rgba(0xFFFFFF, 26.0f / 255.0f)); /* (plain: no sheen) */
+    float a = 0, b = std::clamp(progress, 0.0f, 1.0f);
+    if (progress < 0)
+    {
+        const float run = float(std::fmod(time * 0.6, 1.0));
+        a = std::max(0.0f, run * 1.3f - 0.3f);
+        b = std::min(1.0f, run * 1.3f);
+    }
+    if (b > a)
+        g.panel_across(tx + bar * a, by + 44, bar * (b - a), 6, accent, accent);
+    /* the app's name, small, in the corner */
+    g.text(Font::Regular, 20, 1920 - 64, 1080 - 64, copy, Align::Right, "Playtendoh");
+    g.set_look(look);
+    g.set_tone(toned);
 }
 
-void App::draw_ecam_launch(double)
+void App::draw_ecam_launch(double time)
 {
     Gfx &g = *g_;
     Texture *cover = launch_ ? cover_of(*launch_) : nullptr;
-    if (!ecam_cover_.empty() && !ecam_cover_tried_)
+    if (!ecam_ground_tried_)
     {
-        ecam_cover_tried_ = true;
-        if (access(ecam_cover_.c_str(), R_OK) == 0)
+        /* at once, so the screen never shows without them: the cover, and the ground (the game's picture, else
+         * the cover small) */
+        ecam_cover_tried_ = ecam_ground_tried_ = true;
+        g.set_async_loads(false);
+        const bool has_cover = !ecam_cover_.empty() && access(ecam_cover_.c_str(), R_OK) == 0;
+        if (has_cover)
             ecam_cover_tex_ = g.texture_file(ecam_cover_);
+        if (!ecam_banner_path_.empty() && access(ecam_banner_path_.c_str(), R_OK) == 0)
+            ecam_ground_tex_ = g.texture_file(ecam_banner_path_);
+        else if (has_cover)
+            ecam_ground_tex_ = g.texture_file(ecam_cover_, 24);
+        g.set_async_loads(true);
     }
     if (ecam_cover_tex_ && ecam_cover_tex_->width > 0)
         cover = ecam_cover_tex_;
-    /* The game's own picture, full-screen, as a Wii U game's boot screen; at once, so nothing shows before it */
-    if (!ecam_banner_path_.empty() && !ecam_banner_tried_)
-    {
-        ecam_banner_tried_ = true;
-        if (access(ecam_banner_path_.c_str(), R_OK) == 0)
-        {
-            g.set_async_loads(false);
-            ecam_banner_tex_ = g.texture_file(ecam_banner_path_);
-            g.set_async_loads(true);
-        }
-    }
-    if (ecam_banner_tex_ && ecam_banner_tex_->width > 0)
-    {
-        g.image(ecam_banner_tex_, 0, 0, 1920, 1080);
-        return;
-    }
-    draw_ecam_launch_screen(g, launch_ && launch_->platform == "Wii", cover,
-                            !ecam_title_.empty() ? ecam_title_ : launch_ ? launch_->title : std::string(), tr(launch_status_));
+    draw_ecam_launch_screen(g, launch_ && launch_->platform == "Wii", cover, ecam_ground_tex_,
+                            !ecam_title_.empty() ? ecam_title_ : launch_ ? launch_->title : std::string(), ecam_details_,
+                            tr(launch_status_), launch_progress_, time);
 }
 
 void App::draw_launch(double time)

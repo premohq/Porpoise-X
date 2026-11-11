@@ -3289,7 +3289,7 @@ int main(int argc, char **argv)
         /* Started by Playtendoh: its loading screen up before the splash goes, so no black between. */
         if (ecam_bridge::request.valid && g_gfx.ready())
         {
-            std::string title, cover, banner;
+            std::string title, details, cover, banner;
             bool wii = false;
             if (std::FILE *f = std::fopen((g_data + "/playtendoh-session.txt").c_str(), "r"))
             {
@@ -3301,6 +3301,8 @@ int main(int argc, char **argv)
                         s.pop_back();
                     if (s.rfind("title=", 0) == 0)
                         title = s.substr(6);
+                    else if (s.rfind("details=", 0) == 0)
+                        details = s.substr(8);
                     else if (s.rfind("cover=", 0) == 0)
                         cover = s.substr(6);
                     else if (s.rfind("banner=", 0) == 0)
@@ -3310,26 +3312,27 @@ int main(int argc, char **argv)
                 }
                 std::fclose(f);
             }
-            /* The game's full-screen picture when there's one, else its cover */
+            /* The cover, and the ground: the game's picture, else a small copy of the cover (ui_app.cpp's
+             * draw_ecam_launch_screen) */
+            const bool has_cover = !cover.empty() && access(cover.c_str(), R_OK) == 0;
             const bool has_banner = !banner.empty() && access(banner.c_str(), R_OK) == 0;
             g_gfx.set_async_loads(false);
-            porpoise::ui::Texture *tex = has_banner ? g_gfx.texture_file(banner)
-                                         : !cover.empty() && access(cover.c_str(), R_OK) == 0 ? g_gfx.texture_file(cover) : nullptr;
+            porpoise::ui::Texture *tex = has_cover ? g_gfx.texture_file(cover) : nullptr;
+            porpoise::ui::Texture *blur = has_banner ? g_gfx.texture_file(banner) : has_cover ? g_gfx.texture_file(cover, 24) : nullptr;
             g_gfx.set_async_loads(true);
             for (int frame = 0; frame < 30; ++frame)
             {
-                const bool ready = !tex || tex->width > 0;
+                const bool ready = (!tex || tex->width > 0) && (!blur || blur->width > 0);
                 begin_ui_frame(0.0f);
-                if (has_banner && ready && tex)
-                    g_gfx.image(tex, 0, 0, 1920, 1080);
-                else
-                    porpoise::ui::draw_ecam_launch_screen(g_gfx, wii, ready ? tex : nullptr, title, "");
+                porpoise::ui::draw_ecam_launch_screen(g_gfx, wii, ready ? tex : nullptr, ready ? blur : nullptr, title, details,
+                                                      porpoise::ui::tr("Loading Dolphin"), -1.0f, 0.0);
                 porpoise::vk::present_clear(0, 0, 0);
                 if (ready)
                     break;
             }
-            if (tex)
-                g_gfx.free_texture(tex);
+            for (porpoise::ui::Texture *t : {tex, blur})
+                if (t)
+                    g_gfx.free_texture(t);
         }
         ps5::debug::mark_value("main: splash hidden", sceSystemServiceHideSplashScreen());
         g_pacer.start(porpoise::vk::refresh_hz(), "boot");

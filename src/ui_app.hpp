@@ -125,8 +125,12 @@ std::uint32_t wii_menu_bits(std::uint16_t remote_buttons);
  * the control stick the D-pad. 0 when it isn't plugged in. */
 std::uint32_t gc_menu_bits();
 
-/* Playtendoh's loading screen, as its side has it; also before there's an App to ask (porpoise_main.cpp). */
-void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, const std::string &title, const std::string &status);
+/* Playtendoh's loading screen, its Switch side's (port/eden/ingame.cpp DrawLoading); also before there's an App to
+ * ask (porpoise_main.cpp). cover is the game's box; ground
+ * what fills the screen behind it, dimmed: the game's picture (Playtendoh's title art) or a small copy of the cover
+ * (drawn large, its colours blurred); progress 0..1, or < 0 for a light running along the bar. */
+void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, const std::string &title, const std::string &details,
+                             const std::string &status, float progress, double time);
 
 class App
 {
@@ -1137,9 +1141,9 @@ private:
     bool wii_side_colour() const;
     /* Playtendoh's sheet for the in-game menu (ui_app_ingame.cpp). */
     bool ec_open_ = false, ec_on_tiles_ = true, ec_ring_ok_ = false;
-    std::string ecam_banner_path_; /* the game's full-screen picture, while it starts */
-    Texture *ecam_banner_tex_ = nullptr;
-    bool ecam_banner_tried_ = false;
+    std::string ecam_banner_path_; /* the game's full-screen picture: the loading screen's ground */
+    Texture *ecam_ground_tex_ = nullptr; /* that picture, or the cover small (its colours blurred) */
+    bool ecam_ground_tried_ = false;
     double ec_hold_ = -1; /* when Cross went down on Quit, held to confirm */
     bool ec_quit_held_ = false; /* held long enough: this frame, as Cross on its row */
     int ec_tile_ = 0, ec_cat_ = 0;
