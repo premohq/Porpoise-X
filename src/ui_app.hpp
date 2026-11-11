@@ -1146,6 +1146,15 @@ private:
     int ec_shown_ = -1; /* the category open in the list, whose rows show */
     float ec_scroll_ = 0, ec_scroll_target_ = 0, ec_ring_[4] = {0, 0, 0, 0};
     double ec_time_ = 0;
+    /* Its Buttons category (Playtendoh's app/buttons_menu.h): the GameCube button waiting for a press, and the
+     * press taken still held */
+    int pad_listen_ = -1;
+    bool pad_armed_ = false, pad_settling_ = false;
+    double pad_until_ = 0;
+    void pad_capture();
+    void pad_assign(int gc, int control);
+    void pad_reset();
+    void draw_pad_beside(const Settings &p, int focused_control, bool listening, Color accent);
     bool searching_ = false;
     std::vector<std::string> version_tags_, version_labels_;
     std::vector<std::size_t> version_sizes_;

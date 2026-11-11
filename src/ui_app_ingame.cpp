@@ -130,8 +130,25 @@ std::string gba_state_path(const Settings &p, int port, int slot)
 
 /* The sheet's own "tabs" past Porpoise's, and Achievements (kTabCount): the GBA's rows, and all the Game tab's */
 constexpr int kEcGba = kTabCount + 1, kEcAll = kTabCount + 2;
+/* Its Buttons category (Playtendoh's app/buttons_menu.h): in place of Customize Buttons' screen */
+constexpr int kEcButtons = kTabCount + 3;
 /* Rows of the list on their own, under the categories */
-constexpr int kEcFast = kTabCount + 3, kEcDisc = kTabCount + 4, kEcRestart = kTabCount + 5, kEcVolume = kTabCount + 6;
+constexpr int kEcFast = kTabCount + 4, kEcDisc = kTabCount + 5, kEcRestart = kTabCount + 6, kEcVolume = kTabCount + 7;
+
+/* The Buttons category's names, Playtendoh's (its porpoise_rows.cpp and buttons_menu.h): the GameCube's
+ * buttons in GcInput order, the DualSense's in Control order */
+const char *const kPadButtonNames[GcCount] = {"A", "B", "X", "Y", "Z", "L", "R", "Start",
+                                              "D-pad up", "D-pad down", "D-pad left", "D-pad right"};
+const char *const kPadControlNames[CtlCount] = {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2", "L3", "R3",
+                                                "Options", "Touchpad click", "D-pad up", "D-pad down", "D-pad left", "D-pad right"};
+/* The DualSense control held now (the first in Control order), or -1 */
+int held_control(std::uint32_t held)
+{
+    for (int c = 0; c < CtlCount; ++c)
+        if (held & control_bit(c))
+            return c;
+    return -1;
+}
 
 /* What a row does. */
 enum class Kind
@@ -162,6 +179,9 @@ enum class Kind
     GbaSlot,  /* the GBA state slot (1..9) Load / Save GBA State use */
     GbaImport, /* one of the game's exported saves (its folder's exports), imported with Cross */
     Group, /* 4.5: a heading that opens or closes the rows under it (index: which) */
+    PadTest,   /* Under Playtendoh, its Buttons category: what the DualSense sends now */
+    PadButton, /* a GameCube button (index: GcInput) and its DualSense control: Cross, then the control */
+    PadReset,  /* every button back as they start (held) */
 };
 
 struct Row
@@ -698,6 +718,18 @@ std::vector<Row> sheet_rows(int tab, Settings &p, bool wii, const Patches *patch
                 out.push_back(r);
         return out;
     }
+    if (tab == kEcButtons)
+    {
+        out.push_back({Kind::PadTest, "pad_test", "Controller test"});
+        for (int gc = 0; gc < GcCount; ++gc)
+        {
+            Row r{Kind::PadButton, "", kPadButtonNames[gc]};
+            r.index = gc;
+            out.push_back(r);
+        }
+        out.push_back({Kind::PadReset, "pad_reset", "Reset to defaults"});
+        return out;
+    }
     if (tab == kEcGba)
     {
         for (const int from : {int(kTabGame), int(kTabVideo), int(kTabAudio)})
@@ -711,6 +743,9 @@ std::vector<Row> sheet_rows(int tab, Settings &p, bool wii, const Patches *patch
     }
     for (const Row &r : rows_for(tab, p, wii, patches))
     {
+        /* (Customize Buttons: the Buttons category instead) */
+        if (r.kind == Kind::Customize && !*r.key)
+            continue;
         if (is_gba_row(r) || (tab == kTabAudio && r.key == std::string("volume")) || (tab == kTabGame && (r.kind == Kind::Resume || r.kind == Kind::Save || r.kind == Kind::Load ||
                                                   r.kind == Kind::Shot || r.kind == Kind::Library)))
             continue;
@@ -728,6 +763,9 @@ std::vector<int> sheet_categories(Settings &p, bool wii, int tabs)
             cats.push_back(i);
             if (i == kTabGraphics) /* as the Wii U's: the volume on its own, its slider at once */
                 cats.push_back(kEcVolume);
+            /* the GameCube's buttons (a GameCube controller's in a Wii game too); the Wii Remote's are the hub's */
+            if (i == kTabControls && (!wii || p.wii_controller == porpoise::pad::WiiGameCube))
+                cats.push_back(kEcButtons);
         }
     Patches none;
     if (!sheet_rows(kEcGba, p, wii, &none).empty())
@@ -863,6 +901,9 @@ void App::open_game_menu(Game *game, Settings *play)
     menu_note_.clear();
     menu_restart_armed_ = false;
     map_in_game_ = false;
+    pad_listen_ = -1;
+    pad_settling_ = false;
+    ec_hold_ = -1;
     menu_slots_mode_ = 0;
     menu_confirm_ = false;
     menu_busy_ = {};
@@ -995,6 +1036,13 @@ int App::update_game_menu(const Input &in, double dt)
     if (ws_in_game_)
     {
         update_wii_setup(up, down, left, right);
+        return 0;
+    }
+    /* Under Playtendoh, its Buttons category waiting for a press, or for the one taken to be let go: the menu
+     * gets a still controller meanwhile, as Playtendoh's (app/buttons_menu.h). */
+    if (pad_listen_ >= 0 || pad_settling_)
+    {
+        pad_capture();
         return 0;
     }
     /* Saving or loading: nothing to do but wait. */
@@ -1343,7 +1391,7 @@ int App::update_game_menu(const Input &in, double dt)
         return 0;
     }
     /* Triangle: this tab back to the settings every game uses (Oct 25). */
-    if (pressed(BtnTriangle))
+    if (pressed(BtnTriangle) && menu_tab_ != kEcButtons) /* (Buttons: its own reset row) */
     {
         const bool open[kGroupCount] = {g_group_open[0], g_group_open[1]};
         for (bool &o : g_group_open)
@@ -1675,6 +1723,31 @@ int App::update_game_menu(const Input &in, double dt)
         }
         break;
     case Kind::Info:
+    case Kind::PadTest:
+        break;
+    case Kind::PadButton:
+        if (cross)
+        {
+            /* Wait for a press, five seconds; the Cross that began it let go first */
+            pad_listen_ = row.index;
+            pad_armed_ = false;
+            pad_until_ = time_ + 5.0;
+            menu_note_.clear();
+            sfx(Sound::DetailsFlip);
+        }
+        break;
+    case Kind::PadReset:
+        /* Held, as Playtendoh's: a ring fills over 600 ms */
+        if (pressed(BtnCross))
+            ec_hold_ = time_;
+        else if (!(held_ & BtnCross))
+            ec_hold_ = -1;
+        if (ec_hold_ >= 0 && time_ - ec_hold_ >= 0.6)
+        {
+            ec_hold_ = -1;
+            pad_reset();
+            sfx(Sound::LaunchGame);
+        }
         break;
     case Kind::Group:
         if (cross || left || right)
@@ -2210,6 +2283,24 @@ void App::draw_game_menu(double time)
     const auto row_value = [&](const Row &row, std::string &value, bool &arrows) {
         switch (row.kind)
         {
+        case Kind::PadTest:
+        {
+            /* what the DualSense sends now, or a dash */
+            const int c = held_control(raw_held_ & 0xFFFFu);
+            value = c >= 0 ? tr(kPadControlNames[c]) : std::string("-");
+            arrows = false;
+            break;
+        }
+        case Kind::PadButton:
+        {
+            const int c = p.mapping().control[std::clamp(row.index, 0, GcCount - 1)];
+            value = pad_listen_ == row.index ? tr("Press a button") : c >= 0 && c < CtlCount ? tr(kPadControlNames[c]) : tr("Not set");
+            arrows = false;
+            break;
+        }
+        case Kind::PadReset:
+            arrows = false;
+            break;
         case Kind::Info:
             arrows = false;
             value = row.key == std::string("ws_status") ? tr(ws_value(p.ws_plan, wii)) : tr("None");
@@ -2584,7 +2675,9 @@ void App::draw_game_menu(double time)
             float right = rx + rw - 14;
             if (!row_p)
             {
-                const std::string label = quit ? tr("Quit to the library") : cat_tab == kEcGba ? std::string("GBA") : tr(kCats[cat_tab]);
+                const std::string label = quit ? tr("Quit to the library") : cat_tab == kEcGba ? std::string("GBA")
+                                          : cat_tab == kEcButtons ? tr("Buttons")
+                                                                  : tr(kCats[cat_tab]);
                 g.text_mid(Font::SemiBold, 26, rx + 20, cy, quit ? rgba(0xFF7272) : on ? kWhite : text_c, Align::Left, label);
                 if (!quit)
                     chevron(right - 4, cy, on ? text_c : faint, l.cat == ec_shown_ ? 2 : 0);
@@ -2592,7 +2685,16 @@ void App::draw_game_menu(double time)
                 if (!quit)
                 {
                     std::string says;
-                    if (cat_tab == kTabCount)
+                    if (cat_tab == kEcButtons)
+                    {
+                        /* as Playtendoh's: how many of the buttons have a control */
+                        const Mapping m = p.mapping();
+                        int set = 0;
+                        for (int i = 0; i < GcCount; ++i)
+                            set += m.control[i] >= 0 ? 1 : 0;
+                        says = plural((long long)set, "1 button set", "{n} buttons set");
+                    }
+                    else if (cat_tab == kTabCount)
                         says = trf("{a} of {b}", {{"a", std::to_string(ach_earned)}, {"b", std::to_string(ach_.list.size())}});
                     else if (cat_tab == kTabPatches)
                     {
@@ -2634,7 +2736,7 @@ void App::draw_game_menu(double time)
                 row_value(row, value, arrows);
             const std::string label = row.label ? tr(row.label) : row.text;
             float value_left = right;
-            if (!child && row.kind == Kind::Restart && on)
+            if (((!child && row.kind == Kind::Restart) || (child && row.kind == Kind::PadReset)) && on)
             {
                 hold_mark(right, cy, kAccent);
                 value_left = right - 120;
@@ -2694,6 +2796,17 @@ void App::draw_game_menu(double time)
             draw_achievement_card(1000, 120, 840, 840);
             g.set_layer(slide, 0, 0.3f + 0.7f * t);
         }
+        if (menu_tab_ == kEcButtons && ec_shown_ >= 0)
+        {
+            /* Buttons open: the DualSense beside the sheet, each control with its GameCube button, the focused
+             * one lit (Playtendoh's side_menu.h DrawPad) */
+            int focused = -1;
+            if (ec_open_ && menu_row_ >= 0 && menu_row_ < int(rows.size()) && rows[std::size_t(menu_row_)].kind == Kind::PadButton)
+                focused = p.mapping().control[std::clamp(rows[std::size_t(menu_row_)].index, 0, GcCount - 1)];
+            g.set_layer(0, 0, t);
+            draw_pad_beside(p, focused, pad_listen_ >= 0, kAccent);
+            g.set_layer(slide, 0, 0.3f + 0.7f * t);
+        }
         if (total > room)
         {
             const float bar_top = list_top + room * ec_scroll_ / total, bar_h = room * room / total;
@@ -2715,6 +2828,18 @@ void App::draw_game_menu(double time)
         else if (ec_open_ && !menu_slots_mode_ && !rows.empty())
             {
                 const Row &focus = rows[std::size_t(std::clamp(menu_row_, 0, int(rows.size()) - 1))];
+                if (focus.kind == Kind::PadButton && pad_listen_ == focus.index)
+                {
+                    const long long left = std::max(0LL, (long long)(pad_until_ - time_)) + 1;
+                    text = trf("Press the DualSense button for {button} now.", {{"button", tr(kPadButtonNames[std::clamp(focus.index, 0, GcCount - 1)])}}) +
+                           " " + plural(left, "1 second left, or nothing changes.", "{n} seconds left, or nothing changes.");
+                }
+                else if (focus.kind == Kind::PadTest || focus.kind == Kind::PadButton || focus.kind == Kind::PadReset)
+                    text = tr(focus.kind == Kind::PadTest ? "This player's DualSense input, live."
+                              : focus.kind == Kind::PadButton
+                                  ? "Press Cross, then the DualSense button to use. If another button already uses it, the two swap."
+                                  : "Every button back to the PlayStation layout. Your own layouts are kept.");
+                else
                 text = focus.kind == Kind::Cheat && focus.index >= 0 && focus.index < int(menu_cheats_.size())
                            ? cheat_help(menu_cheats_[std::size_t(focus.index)]) + "  " + tr("Takes effect the next time the game starts.")
                            : focus.key == std::string("ws_status") ? tr(ws_help(p.ws_plan, wii)) : tr(help_for(focus, p));
@@ -2725,6 +2850,8 @@ void App::draw_game_menu(double time)
             const std::vector<int> cats_now = sheet_categories(p, wii, tabs);
             if (ec_cat_ == int(cats_now.size()))
                 text = tr("Leaves the game for the library. What you have not saved in the game is lost, so Cross is held.");
+            else if (cats_now[std::size_t(ec_cat_)] == kEcButtons)
+                text = tr("Choose the DualSense button for each button.");
             if (ec_cat_ < int(cats_now.size()) && cats_now[std::size_t(ec_cat_)] >= kEcFast)
             {
                 const int plain = cats_now[std::size_t(ec_cat_)];
@@ -3104,6 +3231,183 @@ void App::draw_game_menu(double time)
                    tr("This can take a few seconds."));
     }
     g.set_layer();
+}
+
+/* ---- Playtendoh's Buttons category ------------------------------------------------------- */
+
+void App::pad_capture()
+{
+    const bool idle = (raw_held_ & 0xFFFFu) == 0;
+    if (pad_listen_ < 0)
+    {
+        if (idle)
+            pad_settling_ = false; /* the press taken is let go: the menu reads the controller again */
+        return;
+    }
+    const auto stop = [&](const char *message) {
+        pad_listen_ = -1;
+        pad_settling_ = !idle;
+        menu_note_ = tr(message);
+        menu_note_time_ = time_;
+    };
+    if (time_ > pad_until_)
+    {
+        stop("No button pressed. Nothing changed.");
+        sfx(Sound::MovingTab);
+        return;
+    }
+    if (!pad_armed_)
+    {
+        pad_armed_ = idle;
+        return;
+    }
+    const int control = held_control(raw_held_ & ~raw_prev_ & 0xFFFFu);
+    if (control < 0)
+        return;
+    const int gc = pad_listen_;
+    stop("Done.");
+    pad_assign(gc, control);
+    sfx(Sound::LaunchGame);
+}
+
+/* The DualSense beside the sheet, Zacksly's drawing (assets/ui/dualsense.png), each GameCube button's chip in a
+ * column beside it on a line from its control: Playtendoh's side_menu.h DrawPad, place for place. */
+void App::draw_pad_beside(const Settings &p, int focused_control, bool listening, Color accent)
+{
+    Gfx &g = *g_;
+    /* each control's centre on the drawing, in its 1400x900 units (ui_app_controls.cpp's kSpots), in Control order */
+    static constexpr float kSpot[CtlCount][2] = {{1035, 399}, {1114, 319}, {955, 319}, {1035, 240}, {372, 140}, {1028, 140},
+                                                 {366, 112},  {1034, 112}, {525, 468}, {873, 468}, {949, 198}, {700, 233},
+                                                 {363, 250},  {363, 388},  {299, 319}, {428, 319}};
+    /* the drawing, 640 wide, centred at x 1310 */
+    constexpr float kArtX = 990, kArtY = 372, kArtScale = 640.0f / 1400.0f;
+    const auto spot_x = [&](int c) { return kArtX + kSpot[c][0] * kArtScale; };
+    const auto spot_y = [&](int c) { return kArtY + kSpot[c][1] * kArtScale; };
+    const Color title = rgba(0xF5F7FB), faint = rgba(0xF5F7FB, 117.0f / 255.0f);
+    g.text_mid(Font::SemiBold, 32, 960, 156, title, Align::Left, tr("Your controller"));
+    g.text_mid(Font::Regular, 20, 960, 196, faint, Align::Left,
+               fit(g, Font::Regular, 20, tr("Each button shows the console's button it presses."), 900));
+    if (!pad_art_tried_)
+    {
+        pad_art_tried_ = true;
+        pad_art_ = g.texture_file(g.asset_dir() + "/ui/dualsense.png");
+    }
+    if (pad_art_)
+        g.image(pad_art_, kArtX, kArtY, 640, 900 * kArtScale, rgba(0xFFFFFF, 0.94f));
+    else
+    {
+        /* no drawing: the controller's outline, so the chips still have a place */
+        g.panel(kArtX + 90, kArtY + 40, 460, 340, kClear, 1, 120, with_alpha(accent, 0.55f), 2.2f);
+        g.panel(kArtX + 215, kArtY + 45, 210, 115, kClear, 1, 16, rgba(0xFFFFFF, 0.19f), 2.2f);
+    }
+    /* the focused row's control lit; while it waits for a press, every one */
+    const float pulse = 0.75f + 0.25f * std::sin(float(time_) * 5.0f);
+    for (int c = 0; c < CtlCount; ++c)
+        if (listening || c == focused_control)
+        {
+            const float r = listening ? 18.0f : 24.0f;
+            g.panel(spot_x(c) - r, spot_y(c) - r, r * 2, r * 2, with_alpha(accent, (listening ? 0.30f : 0.55f) * pulse), 1, r,
+                    with_alpha(accent, 0.9f), 2.2f);
+        }
+    /* each button's chip: the left half's in a column left of the drawing, the right half's right of it, the
+     * touchpad's above; in the order of their controls from the top, as near level with them as they fit */
+    struct Chip
+    {
+        int gc, control;
+        float y;
+        int side; /* -1 left, 1 right, 0 above */
+    };
+    std::vector<Chip> chips;
+    const Mapping m = p.mapping();
+    for (int gc = 0; gc < GcCount; ++gc)
+    {
+        const int c = m.control[gc];
+        if (c < 0 || c >= CtlCount)
+            continue;
+        const int side = c == CtlTouch ? 0 : kSpot[c][0] < 700 ? -1 : 1;
+        chips.push_back({gc, c, side == 0 ? kArtY - 46 : spot_y(c), side});
+    }
+    std::stable_sort(chips.begin(), chips.end(), [&](const Chip &a, const Chip &b) { return spot_y(a.control) < spot_y(b.control); });
+    constexpr float kGapY = 42, kTop = 300, kBottom = 860;
+    for (int side : {-1, 1})
+    {
+        std::vector<Chip *> column;
+        for (Chip &chip : chips)
+            if (chip.side == side)
+                column.push_back(&chip);
+        float next = kTop;
+        for (Chip *chip : column)
+            next = (chip->y = std::max(chip->y, next)) + kGapY;
+        if (!column.empty() && column.back()->y > kBottom)
+        {
+            float limit = kBottom;
+            for (auto it = column.rbegin(); it != column.rend(); ++it, limit -= kGapY)
+                (*it)->y = std::min((*it)->y, limit);
+        }
+    }
+    for (const Chip &chip : chips)
+    {
+        const bool on = chip.control == focused_control;
+        const std::string label = tr(kPadButtonNames[chip.gc]);
+        const float h = on ? 38.0f : 32.0f, size = on ? 20.0f : 17.0f;
+        const float w = std::max(h, g.measure(Font::Bold, size, label) + h * 0.8f);
+        const float cx = chip.side < 0 ? kArtX - 30 - w / 2 : chip.side > 0 ? kArtX + 640 + 30 + w / 2 : spot_x(chip.control);
+        const float edge_x = chip.side < 0 ? cx + w / 2 : chip.side > 0 ? cx - w / 2 : cx;
+        const float edge_y = chip.side == 0 ? chip.y + h / 2 : chip.y;
+        const float fx = spot_x(chip.control), fy = spot_y(chip.control);
+        g.line(fx, fy, edge_x, edge_y, 1.4f, on ? with_alpha(accent, 0.9f) : rgba(0xFFFFFF, 0.3f));
+        g.panel(fx - 4, fy - 4, 8, 8, on ? accent : rgba(0xFFFFFF, 0.6f), 1, 4);
+        g.panel(cx - w / 2, chip.y - h / 2, w, h, on ? accent : rgba(0x1A2236, 0.94f), 1, h / 2,
+                on ? rgba(0xFFFFFF) : with_alpha(accent, 0.6f), 1.4f);
+        g.text_mid(Font::Bold, size, cx, chip.y, on ? rgba(0x06080F) : title, Align::Center, label);
+    }
+}
+
+/* A GameCube button onto a DualSense control, in the layout the game plays with: the control's old button takes
+ * this one's (the two swap). A ready-made layout is copied into My Layout 1 first, which the game then uses. */
+void App::pad_assign(int gc, int control)
+{
+    Settings *const target = menu_play_;
+    if (!target || gc < 0 || gc >= GcCount)
+        return;
+    int own = target->preset_in_use();
+    const bool copied = own < 0;
+    if (copied)
+    {
+        own = 0;
+        const Mapping m = target->mapping();
+        for (int i = 0; i < GcCount; ++i)
+            settings_->presets[own][i] = m.control[i];
+    }
+    map_target_ = target;
+    map_game_ = menu_game_;
+    map_in_game_ = true;
+    map_preset_ = own;
+    assign_control(gc, control);
+    map_in_game_ = false;
+    if (copied)
+    {
+        menu_note_ = tr("Done. Your buttons are My Layout 1 now.");
+        menu_note_time_ = time_;
+    }
+}
+
+/* Every button back as a first start has them (Settings' button_layout); the player's own layouts are kept. */
+void App::pad_reset()
+{
+    Settings *const target = menu_play_;
+    if (!target)
+        return;
+    const int fallback = LayoutPlayStation; /* (Settings::button_layout's own) */
+    map_target_ = target;
+    map_game_ = menu_game_;
+    map_in_game_ = true;
+    const bool changed = target->button_layout != fallback;
+    target->button_layout = fallback;
+    save_mapping(changed);
+    map_in_game_ = false;
+    menu_note_ = tr("Done.");
+    menu_note_time_ = time_;
 }
 
 void App::return_from_game()
