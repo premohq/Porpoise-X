@@ -28,6 +28,7 @@
 #include "ui_library.hpp"
 #include "ui_settings.hpp"
 #include "porpoise_netfs.hpp"
+#include "ecam_bridge.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
@@ -483,6 +484,74 @@ int main(int argc, char **argv)
         for (int i = 0; i < 40; ++i)
             ui.update_game_menu(none, 0.016);
         shot("menuctl-hub");
+        return 0;
+    }
+
+    /* PV_ECAM_LOADING=1: started by Playtendoh, its loading screen (its Switch side's) */
+    if (getenv("PV_ECAM_LOADING"))
+    {
+        Texture *cover = gfx.texture_file(covers + "/PRVW07.png");
+        Texture *blur = gfx.texture_file(covers + "/PRVW07.png", 24);
+        settle();
+        render("ecam-loading", [&] {
+            draw_ecam_launch_screen(gfx, false, cover, blur, "Kart Party: Double Trouble Grand Prix Edition", "Preview Games  \xC2\xB7  2003",
+                                    "Loading Dolphin", -1.0f, 0.9);
+        });
+        render("ecam-loading-wii", [&] {
+            draw_ecam_launch_screen(gfx, true, cover, blur, "Kart Party", "", "Loading the game (3/5)", 0.6f, 0.0);
+        });
+        return 0;
+    }
+
+    /* PV_ECAM_BUTTONS=1: started by Playtendoh, the in-game sheet's Buttons category (its rows, the DualSense beside
+     * the sheet), then waiting for a press */
+    if (getenv("PV_ECAM_BUTTONS"))
+    {
+        ecam_bridge::request.valid = true;
+        ui.set_ecam(true);
+        porpoise::ui::Game &g0 = lib.games()[0];
+        g0.platform = "GameCube";
+        static porpoise::Settings play;
+        play = settings;
+        Texture *frame = gfx.texture_file(covers + "/PRVW07.png");
+        auto shot = [&](const std::string &name) {
+            render(name.c_str(), [&] {
+                gfx.background();
+                if (frame)
+                    gfx.image(frame, 0, 0, 1920, 1080, rgba(0xFFFFFF));
+                ui.draw_game_menu(12.0);
+            });
+        };
+        auto press = [&](std::uint32_t button) {
+            Input in;
+            in.held = button;
+            ui.update_game_menu(in, 0.016);
+            for (int i = 0; i < 3; ++i)
+                ui.update_game_menu(none, 0.016);
+        };
+        ui.open_game_menu(&g0, &play);
+        for (int i = 0; i < 30; ++i)
+            ui.update_game_menu(none, 0.016);
+        for (int i = 0; i < 6; ++i) /* the tiles, then Video .. Controls, Buttons */
+            press(kDown);
+        shot("ecam-buttons-category");
+        press(kCross);
+        for (int i = 0; i < 30; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("ecam-buttons-open");
+        press(kDown); /* Controller test */
+        press(kDown); /* A */
+        for (int i = 0; i < 20; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("ecam-buttons-a");
+        press(kCross);
+        for (int i = 0; i < 10; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("ecam-buttons-waiting");
+        press(kSquare); /* A onto Square: X, which had it, takes A's */
+        for (int i = 0; i < 10; ++i)
+            ui.update_game_menu(none, 0.016);
+        shot("ecam-buttons-swapped");
         return 0;
     }
 
