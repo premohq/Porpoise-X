@@ -132,6 +132,16 @@ echo "==> [porpoise] step 3/3: staging"
 # (PS5-ECAM makes the tiles) and the menus' music and sounds (PS5-ECAM's launcher has its own, and Porpoise
 # plays none when PS5-ECAM starts it). The emulation's files and the in-game menu's stay.
 rm -rf -- "$dist/assets/forwarder" "$dist/assets/sounds"
+# Nor anything of Porpoise's own looks, which it never shows when Playtendoh starts it (Playtendoh's look,
+# letters and wordmark instead): its brand (the boot's sonar, the logo, the wordmarks, the dolphin), its themes'
+# fonts (Lexend from Playtendoh; Nunito stays as the fallback, Noto for Chinese, Japanese and Korean), the
+# borders of its looks, the Discord code (no Report a Bug row) and the old in-game menu's controller.
+rm -rf -- "$dist/assets/brand"
+for font in Doto Exo2 JetBrainsMono Lora Manrope MPLUS1 PorpoiseSerif VT323; do
+    rm -f -- "$dist/assets/fonts/$font"-*.ttf "$dist/assets/fonts/$font"-OFL.txt
+done
+rm -f -- "$dist/assets/borders/porpoise.png" "$dist/assets/borders/glass.png" "$dist/assets/borders/revolution.png" \
+    "$dist/assets/borders/star-cube.png" "$dist/assets/ui/report-qr.png" "$dist/assets/ui/controller-lines.png"
 cp -a -- "$root/config/LEGAL.txt" "$dist/LEGAL.txt"
 mkdir -p "$dist/cores" "$dist/info" "$dist/system" "$dist/content" "$dist/porpoise"
 # The core ships without its static symbol table (.symtab/.strtab, ~0.7 MB

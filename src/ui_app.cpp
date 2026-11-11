@@ -1816,17 +1816,33 @@ std::string App::clock_text() const
  * centred on cy, h tall. style: 0 the dolphin in cyan and the name in white
  * (dark backdrops), 1 all white (OLED), 2 all black (light backdrops).
  * Returns its width. */
+/* Playtendoh's (port/ui/wordmark.png), in its own assets */
+constexpr const char *kEcamWordmark = "/app0/assets/ui/wordmark.png";
+
 float App::draw_wordmark(float x, float cy, float h, float alpha, int style)
 {
     Gfx &g = *g_;
     if (!wordmark_tried_)
     {
         wordmark_tried_ = true;
-        wordmark_ = g.texture_file(g.asset_dir() + "/brand/wordmark.png");
-        wordmark_mark_ = g.texture_file(g.asset_dir() + "/brand/wordmark-mark.png");
+        if (ecam_)
+            wordmark_ = g.texture_file(kEcamWordmark); /* started by Playtendoh: its name, not Porpoise's */
+        else
+        {
+            wordmark_ = g.texture_file(g.asset_dir() + "/brand/wordmark.png");
+            wordmark_mark_ = g.texture_file(g.asset_dir() + "/brand/wordmark-mark.png");
+        }
     }
     if (!wordmark_ || wordmark_->height <= 0)
         return 0;
+    if (ecam_)
+    {
+        /* Playtendoh's wordmark: a white shape of its name alone, about half the height of Porpoise's (which
+         * has the dolphin beside it), in the middle of the place */
+        const float ph = h * 0.5f, pw = ph * float(wordmark_->width) / float(wordmark_->height);
+        in_true_color([&] { g.image(wordmark_, x, cy - ph * 0.5f, pw, ph, rgba(0xFFFFFF, alpha)); });
+        return pw;
+    }
     const float w = h * float(wordmark_->width) / float(wordmark_->height);
     /* (for the boot to land on, and hidden until it has) */
     brand_box_[0] = x;

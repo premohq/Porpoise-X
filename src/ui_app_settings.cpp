@@ -1784,6 +1784,7 @@ void App::build_settings()
            "For a report on a slow game: notes where the PS5's CPU spends its time while you play, in the debug "
            "logs. It costs a little speed. Takes effect when Porpoise starts again; turn it off after.",
            &draft_.perf_profile);
+    if (!ecam_) /* started by Playtendoh: its reports and Copy Logs to USB take Porpoise's logs */
     {
         SettingRow r;
         r.section = section;
@@ -1852,9 +1853,12 @@ void App::build_settings()
     }
     /* Help and the community: the RIPALDA Discord (bug reports go there now),
      * with a code to scan beside it. */
-    info("Discord", "discord.gg/GgDE5Vynyu",
-         "Help, bug reports, news and the community, on the RIPALDA Discord. Scan the code with your phone to join.");
-    rows_.back().key = "discord";
+    if (!ecam_) /* (Playtendoh's own help is in its Settings) */
+    {
+        info("Discord", "discord.gg/GgDE5Vynyu",
+             "Help, bug reports, news and the community, on the RIPALDA Discord. Scan the code with your phone to join.");
+        rows_.back().key = "discord";
+    }
     action("Diagnostic Test",
            "Cross checks what Porpoise can see and do on this console - the jailbreak, its folder, drives, games, "
            "the last game's speed - and saves the results with the logs, to share on the Discord.",

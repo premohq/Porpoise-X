@@ -3513,8 +3513,8 @@ int main(int argc, char **argv)
         g_app.show_message(porpoise::ui::tr("Forwarded game not found"),
                            porpoise::ui::trf("Porpoise was asked to start {path}, but can't find that file.",
                                              {{"path", forwarded_missing}}));
-    if (forwarded_game || g_settings.reduced_motion)
-        start_entrance(); /* the music comes up with the menus */
+    if (forwarded_game || ecam_bridge::request.valid || g_settings.reduced_motion)
+        start_entrance(); /* the music comes up with the menus; started by Playtendoh, no boot of Porpoise's */
     else
     {
         /* The boot, Sonar (ui_app_boot.cpp): the menus come up under it, and

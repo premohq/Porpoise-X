@@ -67,8 +67,11 @@ std::vector<Border> list()
 {
     std::vector<Border> out;
     out.push_back({"", "None", true});
+    /* (a copy of Porpoise that leaves one of them out lists only those it carries: Playtendoh's has none of
+     * Porpoise's own looks') */
     for (const BuiltIn &b : kBuiltIn)
-        out.push_back({b.name, b.label, true});
+        if (exists(g_assets + "/borders/" + b.name + ".png"))
+            out.push_back({b.name, b.label, true});
     std::vector<std::string> mine;
     if (DIR *d = opendir(user_dir().c_str()))
     {
