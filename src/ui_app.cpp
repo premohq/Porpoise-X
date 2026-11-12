@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -3666,12 +3667,16 @@ void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, 
     }
     if (b > a)
         g.panel_across(tx + bar * a, by + 44, bar * (b - a), 6, accent, accent);
-    /* at the foot, once the wait has gone on a moment: Playtendoh's quotes, each with who said it under it, the
-     * next every nine seconds, faded in and out (its loading_screen.h's) */
-    if (quotes && !quotes->empty() && time > 1.5)
+    /* at the foot: Playtendoh's quotes, each with who said it under it, the next every nine seconds, faded in and
+     * out (its loading_screen.h's). Timed in real seconds from this screen's first frame, not by time: Porpoise's
+     * clock hardly moves while a game boots, and this screen is drawn only now and then meanwhile. The first is
+     * there from the start, as Porpoise's wait is a short one. */
+    if (quotes && !quotes->empty())
     {
-        const double t = time - 1.5, into = std::fmod(t, 9.0);
-        const float shown = float(std::clamp(std::min(into, 9.0 - into) / 0.6, 0.0, 1.0));
+        static const std::chrono::steady_clock::time_point first_shown = std::chrono::steady_clock::now();
+        const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - first_shown).count();
+        const double into = std::fmod(t, 9.0);
+        const float shown = float(std::clamp((t < 9.0 ? 9.0 - into : std::min(into, 9.0 - into)) / 0.6, 0.0, 1.0));
         const std::pair<std::string, std::string> &quote = (*quotes)[std::size_t(t / 9.0) % quotes->size()];
         const float credit_y = 1080 - 64;
         const std::vector<std::string> lines = wrap(g, Font::Regular, 26, quote.first, 1920 - x0 - 420, 3);

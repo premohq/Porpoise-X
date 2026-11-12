@@ -3290,6 +3290,7 @@ int main(int argc, char **argv)
         if (ecam_bridge::request.valid && g_gfx.ready())
         {
             std::string title, details, cover, banner;
+            porpoise::ui::EcamQuotes quotes; /* quote= then quote_by=: the screen's foot from its first frame */
             bool wii = false;
             if (std::FILE *f = std::fopen((g_data + "/playtendoh-session.txt").c_str(), "r"))
             {
@@ -3309,6 +3310,10 @@ int main(int argc, char **argv)
                         banner = s.substr(7);
                     else if (s == "side=Wii")
                         wii = true;
+                    else if (s.rfind("quote=", 0) == 0)
+                        quotes.emplace_back(s.substr(6), std::string());
+                    else if (s.rfind("quote_by=", 0) == 0 && !quotes.empty())
+                        quotes.back().second = s.substr(9);
                 }
                 std::fclose(f);
             }
@@ -3325,7 +3330,7 @@ int main(int argc, char **argv)
                 const bool ready = (!tex || tex->width > 0) && (!blur || blur->width > 0);
                 begin_ui_frame(0.0f);
                 porpoise::ui::draw_ecam_launch_screen(g_gfx, wii, ready ? tex : nullptr, ready ? blur : nullptr, title, details,
-                                                      porpoise::ui::tr("Loading Dolphin"), -1.0f, 0.0);
+                                                      porpoise::ui::tr("Loading Dolphin"), -1.0f, 0.0, &quotes);
                 porpoise::vk::present_clear(0, 0, 0);
                 if (ready)
                     break;
