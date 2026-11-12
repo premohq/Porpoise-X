@@ -128,9 +128,12 @@ std::uint32_t gc_menu_bits();
 /* Playtendoh's loading screen, its Switch side's (port/eden/ingame.cpp DrawLoading); also before there's an App to
  * ask (porpoise_main.cpp). cover is the game's box; ground
  * what fills the screen behind it, dimmed: the game's picture (Playtendoh's title art) or a small copy of the cover
- * (drawn large, its colours blurred); progress 0..1, or < 0 for a light running along the bar. */
+ * (drawn large, its colours blurred); progress 0..1, or < 0 for a light running along the bar. quotes: Playtendoh's
+ * (its app/quotes.h, in its session file), each its words and who said them, shown at the foot one after another
+ * once the wait has gone on a moment, as its loading_screen.h does. */
+using EcamQuotes = std::vector<std::pair<std::string, std::string>>;
 void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, const std::string &title, const std::string &details,
-                             const std::string &status, float progress, double time);
+                             const std::string &status, float progress, double time, const EcamQuotes *quotes = nullptr);
 
 class App
 {
@@ -1099,6 +1102,10 @@ public:
         ecam_details_ = details;
         ecam_cover_ = cover;
     }
+    void set_ecam_quotes(EcamQuotes quotes)
+    {
+        ecam_quotes_ = std::move(quotes);
+    }
     void set_diagnostics(std::function<std::vector<std::pair<bool, std::string>>()> checks)
     {
         diagnostics_ = std::move(checks);
@@ -1135,6 +1142,7 @@ private:
     bool sandboxed_ = false;
     bool ecam_ = false;
     std::string ecam_side_, ecam_title_, ecam_details_, ecam_cover_;
+    EcamQuotes ecam_quotes_;
     Texture *ecam_cover_tex_ = nullptr;
     bool ecam_cover_tried_ = false;
     void draw_ecam_launch(double time);

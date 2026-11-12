@@ -3608,7 +3608,7 @@ void App::set_launch_status(const std::string &status, float progress)
  * colours blurred over the screen (or the game's picture, when Playtendoh has one), darker on the left; the cover on the left with a soft shadow; beside it the
  * system's chip, the game's name, its publisher and year, and at the cover's foot what's happening over a bar. */
 void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, const std::string &title, const std::string &details,
-                             const std::string &status, float progress, double time)
+                             const std::string &status, float progress, double time, const EcamQuotes *quotes)
 {
     const Color accent = rgba(wii ? 0x3FCFF0 : 0x6F6CFF), ink = rgba(0x05070D);
     const Color text_c = rgba(0xF5F7FB), copy = rgba(0xF5F7FB, 179.0f / 255.0f);
@@ -3666,6 +3666,19 @@ void draw_ecam_launch_screen(Gfx &g, bool wii, Texture *cover, Texture *ground, 
     }
     if (b > a)
         g.panel_across(tx + bar * a, by + 44, bar * (b - a), 6, accent, accent);
+    /* at the foot, once the wait has gone on a moment: Playtendoh's quotes, each with who said it under it, the
+     * next every nine seconds, faded in and out (its loading_screen.h's) */
+    if (quotes && !quotes->empty() && time > 1.5)
+    {
+        const double t = time - 1.5, into = std::fmod(t, 9.0);
+        const float shown = float(std::clamp(std::min(into, 9.0 - into) / 0.6, 0.0, 1.0));
+        const std::pair<std::string, std::string> &quote = (*quotes)[std::size_t(t / 9.0) % quotes->size()];
+        const float credit_y = 1080 - 64;
+        const std::vector<std::string> lines = wrap(g, Font::Regular, 26, quote.first, 1920 - x0 - 420, 3);
+        for (std::size_t i = 0; i < lines.size(); ++i)
+            g.text(Font::Regular, 26, x0, credit_y - 12 - float(lines.size() - i) * 36, with_alpha(text_c, shown), Align::Left, lines[i]);
+        g.text(Font::Regular, 20, x0, credit_y, with_alpha(copy, shown), Align::Left, quote.second);
+    }
     /* the app's name, small, in the corner */
     g.text(Font::Regular, 20, 1920 - 64, 1080 - 64, copy, Align::Right, "Playtendoh");
     g.set_look(look);
@@ -3695,7 +3708,7 @@ void App::draw_ecam_launch(double time)
         cover = ecam_cover_tex_;
     draw_ecam_launch_screen(g, launch_ && launch_->platform == "Wii", cover, ecam_ground_tex_,
                             !ecam_title_.empty() ? ecam_title_ : launch_ ? launch_->title : std::string(), ecam_details_,
-                            tr(launch_status_), launch_progress_, time);
+                            tr(launch_status_), launch_progress_, time, &ecam_quotes_);
 }
 
 void App::draw_launch(double time)

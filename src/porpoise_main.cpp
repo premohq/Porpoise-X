@@ -3431,6 +3431,7 @@ int main(int argc, char **argv)
         /* Playtendoh's word on the game it started: a line each, key=value; this game's only. */
         const std::string file = g_data + "/playtendoh-session.txt";
         std::string side, title, details, cover, banner;
+        porpoise::ui::EcamQuotes quotes; /* quote= then quote_by=, in the order to show them */
         if (std::FILE *f = std::fopen(file.c_str(), "r"))
         {
             char line[1024];
@@ -3453,11 +3454,16 @@ int main(int argc, char **argv)
                     cover = v;
                 else if (k == "banner")
                     banner = v;
+                else if (k == "quote")
+                    quotes.emplace_back(v, std::string());
+                else if (k == "quote_by" && !quotes.empty())
+                    quotes.back().second = v;
             }
             std::fclose(f);
             std::remove(file.c_str());
         }
         g_app.set_ecam_session(side, title, details, cover, banner);
+        g_app.set_ecam_quotes(std::move(quotes));
     }
     g_app.set_diagnostics(diagnostics);
     /* Started by PS5-ECAM, no first start of Porpoise's: PS5-ECAM set up its folder (/data/porpoise, where
