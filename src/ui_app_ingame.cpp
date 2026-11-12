@@ -776,7 +776,7 @@ std::vector<int> sheet_categories(Settings &p, bool wii, int tabs)
     for (const Row &r : rows_for(kTabGame, p, wii, &none))
         if (r.kind == Kind::Disc)
             cats.push_back(kEcDisc);
-    cats.push_back(kEcRestart);
+    /* (no Start Over row: the Reset tile, as Playtendoh's other sides have it) */
     return cats;
 }
 } // namespace
@@ -1182,11 +1182,29 @@ int App::update_game_menu(const Input &in, double dt)
                 if (left || right)
                 {
                     ec_tile_ = std::clamp(ec_tile_ + (right ? 1 : -1), 0, 3);
+                    ec_hold_ = -1;
                     sfx(Sound::MenuScroll);
                 }
-                if (pressed(BtnCross))
+                if (ec_tile_ == 3)
                 {
-                    static constexpr Kind kTiles[4] = {Kind::Resume, Kind::Save, Kind::Load, Kind::Shot};
+                    /* Reset, held as Playtendoh's Reset tile is on its other sides: what isn't saved goes with it.
+                     * (A screenshot is Touchpad + Square, Screenshot buttons in Playtendoh's Settings.) */
+                    if (pressed(BtnCross))
+                        ec_hold_ = time_;
+                    else if (!(held_ & BtnCross))
+                        ec_hold_ = -1;
+                    if (ec_hold_ >= 0 && time_ - ec_hold_ >= 0.6)
+                    {
+                        ec_hold_ = -1;
+                        ec_quit_held_ = true;
+                        menu_restart_armed_ = true;
+                        choose(Kind::Restart);
+                        chosen = true;
+                    }
+                }
+                else if (pressed(BtnCross))
+                {
+                    static constexpr Kind kTiles[3] = {Kind::Resume, Kind::Save, Kind::Load};
                     choose(kTiles[ec_tile_]);
                     chosen = true;
                 }
@@ -2449,7 +2467,7 @@ void App::draw_game_menu(double time)
 
     /* The tiles. */
     {
-        static const char *const kNames[4] = {"Resume", "Save State", "Load State", "Screenshot"};
+        static const char *const kNames[4] = {"Resume", "Save State", "Load State", "Reset"};
         const float tw = kInner / 4;
         for (int i = 0; i < 4; ++i)
         {
@@ -2489,10 +2507,28 @@ void App::draw_game_menu(double time)
             }
             else
             {
-                /* a camera */
-                g.panel(ix - 15, iy - 9, 30, 21, kClear, 1, 4, ink, th_);
-                g.line(ix - 6, iy - 12, ix + 6, iy - 12, th_, ink);
-                g.panel(ix - 6, iy - 3, 12, 12, kClear, 1, 6, ink, th_);
+                /* an arrow round, back to the start: three quarters of a circle, its head at the top */
+                constexpr int kArc = 18;
+                const float ar = 12;
+                for (int k = 0; k < kArc; ++k)
+                {
+                    const float a0 = -kPi * 0.5f + 1.5f * kPi * float(k) / kArc, a1 = -kPi * 0.5f + 1.5f * kPi * float(k + 1) / kArc;
+                    g.line(ix + ar * std::cos(a0), iy + ar * std::sin(a0), ix + ar * std::cos(a1), iy + ar * std::sin(a1), th_, ink);
+                }
+                g.line(ix, iy - ar, ix - 6, iy - ar - 5, th_, ink);
+                g.line(ix, iy - ar, ix - 6, iy - ar + 5, th_, ink);
+                /* held: a ring round the tile fills, as a held row's does */
+                if (on && ec_hold_ >= 0)
+                {
+                    const float progress = std::min(1.0f, float((time_ - ec_hold_) / 0.6));
+                    constexpr int kSegments = 40;
+                    for (int s = 0; s < kSegments && float(s + 1) / kSegments <= progress; ++s)
+                    {
+                        const float a0 = -kPi * 0.5f + 2 * kPi * float(s) / kSegments, a1 = -kPi * 0.5f + 2 * kPi * float(s + 1) / kSegments;
+                        const float rr = radius + 5;
+                        g.line(ix + rr * std::cos(a0), iy + rr * std::sin(a0), ix + rr * std::cos(a1), iy + rr * std::sin(a1), 3, kWhite);
+                    }
+                }
             }
             g.text_mid(Font::Regular, 20, ix, kTilesTop + 96, on ? kWhite : copy, Align::Center, fit(g, Font::Regular, 20, tr(kNames[i]), tw - 8));
         }
