@@ -544,7 +544,6 @@
       "id": "jetbrains-mono",
       "name": "JetBrains Mono font (the Terminal theme)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/JetBrainsMono-Regular.ttf",
         "assets/fonts/JetBrainsMono-SemiBold.ttf",
@@ -572,7 +571,6 @@
       "id": "vt323",
       "name": "VT323 font (the Broadcast theme)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/VT323-Regular.ttf"
       ],
@@ -597,7 +595,6 @@
       "id": "doto",
       "name": "Doto font (the Dot Matrix and Star Cube themes' headings)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/Doto-Black.ttf"
       ],
@@ -622,7 +619,6 @@
       "id": "exo-2",
       "name": "Exo 2 font (the Synthwave theme)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/Exo2-Regular.ttf",
         "assets/fonts/Exo2-SemiBold.ttf",
@@ -650,7 +646,6 @@
       "id": "lora",
       "name": "Lora font, as Porpoise Serif (the Paper theme)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/PorpoiseSerif-Regular.ttf",
         "assets/fonts/PorpoiseSerif-SemiBold.ttf",
@@ -678,7 +673,6 @@
       "id": "mplus1",
       "name": "M PLUS 1 font (Settings > Interface > Font)",
       "kind": "asset",
-      "always": true,
       "artifacts": [
         "assets/fonts/MPLUS1-Regular.ttf",
         "assets/fonts/MPLUS1-SemiBold.ttf",
